@@ -1,6 +1,6 @@
 # Freeze Tag for Quake 2 Rerelease
 
-![Freeze Tag Logo](https://darrellbircsak.com/wp-content/uploads/2016/03/getfreeze.gif)
+![Freeze Tag Logo](https://darrellbircsak.com/wp-content/uploads/2016/03/getfreeze.gif) [![View Freeze Tag on ModDB](https://button.moddb.com/rating/medium/mods/68289.png)](https://www.moddb.com/mods/freeze-tag)
 
 In 2023, Quake 2 was re-released: [Bethesda article](https://bethesda.net/en/article/6NIyBxapXOurTKtF4aPiF4/enhancing-quake-ii)
 
