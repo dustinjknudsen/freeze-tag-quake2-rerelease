@@ -19,7 +19,7 @@ Shoot the enemy team. When they die, they "freeze" and cannot respawn. Kill ever
 ---
 
 ## Current state:
-- Works with bots, though they don't unfreeze people
+- Works with bots
 
 ## Known issues:
 - Using chase cam not really working
