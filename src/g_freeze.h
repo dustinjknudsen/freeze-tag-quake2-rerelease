@@ -20,6 +20,7 @@ bool freezeCheck(edict_t* ent, mod_t mod);
 void freezeAnim(edict_t* ent);
 bool gibCheck();
 void gibThink(edict_t* ent);
+void freezeBotHelper();
 void freezeMain(edict_t* ent);
 void freezeIntermission(void);
 bool endCheck();

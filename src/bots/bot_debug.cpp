@@ -4,6 +4,9 @@
 #include "../g_local.h"
 #include "bot_utils.h"
 #include "bot_debug.h"
+/* freeze */
+#include "../g_freeze.h"
+/* freeze */
 
 static const edict_t * escortBot = nullptr;
 static const edict_t * escortActor = nullptr;
@@ -159,6 +162,9 @@ Bot_UpdateDebug
 ================
 */
 void Bot_UpdateDebug() {
+	/* freeze */
+	freezeBotHelper();
+	/* freeze */
 	if ( !sv_cheats->integer ) {
 		return;
 	}

@@ -279,6 +279,7 @@ void freezeAnim(edict_t* ent)
 	ent->client->frozen = true;
 	ent->client->frozen_time = level.time + gtime_t::from_sec(frozen_time->value);
 	ent->client->resp.thawer = nullptr;
+	ent->client->bot_helper = nullptr;
 	ent->client->thaw_time = HOLD_FOREVER;
 	if (frandom() > 0.3)
 		ent->client->hookstate -= ent->client->hookstate & (grow_on | shrink_on);
@@ -355,6 +356,67 @@ void playerView(edict_t* ent)
 		ent->client->viewed = best_other;
 	else
 		ent->client->viewed = nullptr;
+}
+
+void playerBotHelper(edict_t* ent) {
+	if (ent->client->bot_helper) {
+		edict_t* other = ent->client->bot_helper;
+		if (other->health <= 0 || other->client->frozen) {
+			ent->client->bot_helper = nullptr;
+			other->client->bot_helper = nullptr;
+		}
+		else {
+			return;
+		}
+	}
+
+	edict_t* other;
+	float best_distance = std::numeric_limits<float>::max();
+	edict_t* best_other = nullptr;
+	for (uint32_t i = 0; i < game.maxclients; i++) {
+		other = g_edicts + 1 + i;
+		if (!other->inuse)
+			continue;
+		if (other->client->resp.spectator)
+			continue;
+		if (other == ent)
+			continue;
+		if (other->health <= 0)
+			continue;
+		if (other->client->resp.ctf_team != ent->client->resp.ctf_team)
+			continue;
+		if (!(other->svflags & SVF_BOT))
+			continue;
+		if (other->client->bot_helper)
+			continue;
+		float dist = (ent->s.origin - other->s.origin).length();
+		if (dist < best_distance) {
+			best_distance = dist;
+			best_other = other;
+		}
+	}
+	if (best_other) {
+		ent->client->bot_helper = best_other;
+		best_other->client->bot_helper = ent;
+	}
+}
+
+void freezeBotHelper() {
+	edict_t* ent;
+	for (uint32_t i = 0; i < game.maxclients; i++) {
+		ent = g_edicts + 1 + i;
+		if (!ent->inuse)
+			continue;
+		if (ent->client->resp.spectator)
+			continue;
+		if (ent->client->frozen)
+			continue;
+		if (!ent->client->bot_helper || !ent->client->bot_helper->client->frozen)
+			continue;
+		if (!(ent->svflags & SVF_BOT))
+			continue;
+		gi.Bot_MoveToPoint(ent, ent->client->bot_helper->s.origin, 0);
+	}
 }
 
 void playerThaw(edict_t* ent)
@@ -438,6 +500,10 @@ void playerBreak(edict_t* ent, int force)
 	ent->client->frozen = false;
 	freeze[get_team_int(ent->client->resp.ctf_team)].update = true;
 	ent->client->ps.stats[STAT_CHASE] = 0;
+	if (ent->client->bot_helper) {
+		ent->client->bot_helper->client->bot_helper = nullptr;
+		ent->client->bot_helper = nullptr;
+	}
 }
 
 void playerUnfreeze(edict_t* ent)
@@ -516,6 +582,7 @@ void freezeMain(edict_t* ent)
 		return;
 	if (ent->client->frozen)
 	{
+		playerBotHelper(ent);
 		playerThaw(ent);
 		playerUnfreeze(ent);
 	}

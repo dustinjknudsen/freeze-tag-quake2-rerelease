@@ -3015,6 +3015,7 @@ struct gclient_t
 	/* freeze */
 	bool	frozen;
 	edict_t* viewed;
+	edict_t*	bot_helper;
 	gtime_t	thaw_time;
 	gtime_t	frozen_time;
 	int	hookstate;
