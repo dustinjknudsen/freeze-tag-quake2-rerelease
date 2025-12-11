@@ -3555,13 +3555,14 @@ struct fmt::formatter<edict_t>
 		return ctx.begin();
 	}
 
-    template<typename FormatContext>
-    auto format(const edict_t &p, FormatContext &ctx) -> decltype(ctx.out())
-    {
+	template<typename FormatContext>
+	// Added 'const' before the arrow -> 
+	auto format(const edict_t& p, FormatContext& ctx) const -> decltype(ctx.out())
+	{
 		if (p.linked)
 			return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), p.classname, (p.absmax + p.absmin) * 0.5f);
 		return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), p.classname, p.s.origin);
-    }
+	}
 };
 
 // POI tags used by this mod
