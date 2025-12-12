@@ -31,3 +31,8 @@ void cmdHook(edict_t* ent);
 void freezeSpawn();
 void cvarFreeze();
 bool humanPlaying(edict_t* ent);
+
+// Frozen body ghost entity functions (for chase camera)
+void CreateFrozenBodyGhost(edict_t* ent);
+void UpdateFrozenBodyGhost(edict_t* ent);
+void RemoveFrozenBodyGhost(edict_t* ent);

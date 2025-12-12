@@ -1,34 +1,30 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "g_freeze.h"
 
-void UpdateChaseCam(edict_t *ent)
+void UpdateChaseCam(edict_t* ent)
 {
-	vec3_t	 o, ownerv, goal;
-	edict_t *targ;
-	vec3_t	 forward, right;
-	trace_t	 trace;
-	vec3_t	 oldgoal;
-	vec3_t	 angles;
+	vec3_t       o, ownerv, goal;
+	edict_t* targ;
+	vec3_t       forward, right;
+	trace_t      trace;
+	vec3_t       oldgoal;
+	vec3_t       angles;
 
 	// is our chase target gone?
-	/* freeze */
-	if (!ent->client->chase_target->inuse || ent->client->chase_target->client->resp.spectator || 
-		(ent->client->frozen && (ent->client->frozen_time < level.time + 2_sec || ent->client->thaw_time < level.time + 1_sec)) || 
+	if (!ent->client->chase_target->inuse || ent->client->chase_target->client->resp.spectator ||
+		(ent->client->frozen && (ent->client->frozen_time < level.time + 2_sec || ent->client->thaw_time < level.time + 1_sec)) ||
 		(ent->health < 0 && !ent->client->frozen))
 	{
-	/* freeze
-	if (!ent->client->chase_target->inuse || ent->client->chase_target->client->resp.spectator)
-	{
-		edict_t *old = ent->client->chase_target;
-		ChaseNext(ent);
-		if (ent->client->chase_target == old)
-	freeze */
-		{
-			ent->client->chase_target = nullptr;
-			ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
-			return;
-		}
+		ent->client->chase_target = nullptr;
+		ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
+
+		// Remove ghost when exiting chase mode
+		if (ent->client->frozen)
+			RemoveFrozenBodyGhost(ent);
+
+		return;
 	}
 
 	targ = ent->client->chase_target;
@@ -41,6 +37,7 @@ void UpdateChaseCam(edict_t *ent)
 	angles = targ->client->v_angle;
 	if (angles[PITCH] > 56)
 		angles[PITCH] = 56;
+
 	AngleVectors(angles, forward, right, nullptr);
 	forward.normalize();
 	o = ownerv + (forward * -30);
@@ -52,13 +49,14 @@ void UpdateChaseCam(edict_t *ent)
 	if (!targ->groundentity)
 		o[2] += 16;
 
+	// Trace from target's viewpoint to desired camera position
 	trace = gi.traceline(ownerv, o, targ, MASK_SOLID);
 
 	goal = trace.endpos;
-
-	goal += (forward * 2);
+	goal += (forward * 2); // Back off slightly
 
 	// pad for floors and ceilings
+	// Check ceiling clip
 	o = goal;
 	o[2] += 6;
 	trace = gi.traceline(goal, o, targ, MASK_SOLID);
@@ -68,6 +66,7 @@ void UpdateChaseCam(edict_t *ent)
 		goal[2] -= 6;
 	}
 
+	// Check floor clip
 	o = goal;
 	o[2] -= 6;
 	trace = gi.traceline(goal, o, targ, MASK_SOLID);
@@ -77,20 +76,37 @@ void UpdateChaseCam(edict_t *ent)
 		goal[2] += 6;
 	}
 
-	/* freeze */
-	if (ent->client->frozen) {
-		ent->client->ps.pmove.origin = goal * 8;
-	} else {
-	/* freeze */
-	if (targ->deadflag)
-		ent->client->ps.pmove.pm_type = PM_DEAD;
-	else
-		ent->client->ps.pmove.pm_type = PM_FREEZE;
+	//// Show chase target name when switching
+	//if (ent->client->update_chase) {
+	//	gi.Center_Print(ent, "Chasing: {}", targ->client->pers.netname);
+	//	ent->client->update_chase = false;
+	//}
 
-	ent->s.origin = goal;
-	/* freeze */
+	if (ent->client->frozen) {
+		// Create ghost if it doesn't exist
+		CreateFrozenBodyGhost(ent);
+
+		// Update ghost visual state
+		UpdateFrozenBodyGhost(ent);
+
+		// Hide the real player entity from this client's view
+		ent->svflags |= SVF_NOCLIENT;
+
+		// Move camera to chase position
+		ent->client->ps.pmove.origin = goal;
+		ent->client->ps.pmove.pm_type = PM_SPECTATOR;
+		ent->client->ps.viewoffset = {};
+
 	}
-	/* freeze */
+	else {
+		if (targ->deadflag)
+			ent->client->ps.pmove.pm_type = PM_DEAD;
+		else
+			ent->client->ps.pmove.pm_type = PM_FREEZE;
+
+		ent->s.origin = goal;
+	}
+
 	ent->client->ps.pmove.delta_angles = targ->client->v_angle - ent->client->resp.cmd_angles;
 
 	if (targ->deadflag)
@@ -102,15 +118,17 @@ void UpdateChaseCam(edict_t *ent)
 	else
 	{
 		ent->client->ps.viewangles = targ->client->v_angle;
+		ent->client->ps.viewangles[ROLL] = 0;  // Keep camera level
+
 		ent->client->v_angle = targ->client->v_angle;
 		AngleVectors(ent->client->v_angle, ent->client->v_forward, nullptr, nullptr);
 	}
 
 	ent->viewheight = 0;
-	/* freeze */
-	if (!ent->client->frozen)
-	/* freeze */
+
+	// Always disable prediction to prevent jitter
 	ent->client->ps.pmove.pm_flags |= PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION;
+
 	gi.linkentity(ent);
 }
 

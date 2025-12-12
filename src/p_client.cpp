@@ -3208,12 +3208,12 @@ This will be called once for each client frame, which will
 usually be a couple times for each server frame.
 ==============
 */
-void ClientThink(edict_t *ent, usercmd_t *ucmd)
+void ClientThink(edict_t* ent, usercmd_t* ucmd)
 {
-	gclient_t *client;
-	edict_t	  *other;
-	uint32_t   i;
-	pmove_t	   pm;
+	gclient_t* client;
+	edict_t* other;
+	uint32_t	i;
+	pmove_t		pm;
 
 	level.current_entity = ent;
 	client = ent->client;
@@ -3261,27 +3261,22 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 		return;
 	}
 
-	/* freeze */
-	if (ent->client->chase_target && !ent->client->frozen)
-	/* freeze
 	if (ent->client->chase_target)
-	freeze */
 	{
 		client->resp.cmd_angles = ucmd->angles;
-		ent->movetype = MOVETYPE_NOCLIP;
+		if (!ent->client->frozen)
+			ent->movetype = MOVETYPE_NOCLIP;
 	}
 	else
 	{
 
 		// set up for pmove
 		memset(&pm, 0, sizeof(pm));
-		
 		if (ent->movetype == MOVETYPE_NOCLIP)
 		{
 			if (ent->client->menu)
 			{
 				client->ps.pmove.pm_type = PM_FREEZE;
-				
 				// [Paril-KEX] handle menu movement
 				HandleMenuMovement(ent, ucmd);
 			}
@@ -3303,14 +3298,14 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 
 		// [Paril-KEX]
 		if (!G_ShouldPlayersCollide(false) ||
-				(coop->integer && !(ent->clipmask & CONTENTS_PLAYER)) // if player collision is on and we're temporarily ghostly...
+			(coop->integer && !(ent->clipmask & CONTENTS_PLAYER)) // if player collision is on and we're temporarily ghostly...
 			)
 			client->ps.pmove.pm_flags |= PMF_IGNORE_PLAYER_COLLISION;
 		else
 			client->ps.pmove.pm_flags &= ~PMF_IGNORE_PLAYER_COLLISION;
 
-		// PGM	trigger_gravity support
-		client->ps.pmove.gravity = (short) (level.gravity * ent->gravity);
+		// PGM trigger_gravity support
+		client->ps.pmove.gravity = (short)(level.gravity * ent->gravity);
 		pm.s = client->ps.pmove;
 
 		pm.s.origin = ent->s.origin;
@@ -3362,7 +3357,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 
 			if (pm.s.pm_flags & PMF_ON_LADDER)
 			{
-				if (!deathmatch->integer && 
+				if (!deathmatch->integer &&
 					client->last_ladder_sound < level.time)
 				{
 					ent->s.event = EV_LADDER_STEP;
@@ -3393,7 +3388,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 		if (ent->flags & FL_SAM_RAIMI)
 			ent->viewheight = 8;
 		else
-			ent->viewheight = (int) pm.s.viewheight;
+			ent->viewheight = (int)pm.s.viewheight;
 		// ROGUE
 
 		ent->waterlevel = pm.waterlevel;
@@ -3404,9 +3399,9 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 
 		/* freeze */
 		if (ent->deadflag && !ent->client->frozen)
-		/* freeze
-		if (ent->deadflag)
-		freeze */
+			/* freeze
+			if (ent->deadflag)
+			freeze */
 		{
 			client->ps.viewangles[ROLL] = 40;
 			client->ps.viewangles[PITCH] = -15;
@@ -3445,7 +3440,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 		// touch other objects
 		for (i = 0; i < pm.touch.num; i++)
 		{
-			trace_t &tr = pm.touch.traces[i];
+			trace_t& tr = pm.touch.traces[i];
 			other = tr.ent;
 
 			if (other->touch)

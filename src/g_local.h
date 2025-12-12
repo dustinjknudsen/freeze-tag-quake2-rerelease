@@ -3018,6 +3018,7 @@ struct gclient_t
 	edict_t*	bot_helper;
 	gtime_t	thaw_time;
 	gtime_t	frozen_time;
+	edict_t* frozen_body;
 	int	hookstate;
 	int	hooker;
 	gtime_t	moan_time;

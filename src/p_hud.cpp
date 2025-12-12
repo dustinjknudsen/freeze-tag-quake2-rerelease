@@ -1118,28 +1118,26 @@ void G_CheckChaseStats(edict_t *ent)
 G_SetSpectatorStats
 ===============
 */
-void G_SetSpectatorStats(edict_t *ent)
+void G_SetSpectatorStats(edict_t* ent)
 {
-	gclient_t *cl = ent->client;
-
+	gclient_t* cl = ent->client;
 	if (!cl->chase_target)
 		G_SetStats(ent);
-
 	/* freeze */
 	if (cl->resp.spectator)
-	/* freeze */
-	cl->ps.stats[STAT_SPECTATOR] = 1;
-
+		/* freeze */
+		cl->ps.stats[STAT_SPECTATOR] = 1;
 	// layouts are independant in spectator
 	cl->ps.stats[STAT_LAYOUTS] = 0;
 	if (cl->pers.health <= 0 || level.intermissiontime || cl->showscores)
 		cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
 	if (cl->showinventory && cl->pers.health > 0)
 		cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
-
-	if (cl->chase_target && cl->chase_target->inuse)
-		cl->ps.stats[STAT_CHASE] = CS_PLAYERSKINS +
-								   (cl->chase_target - g_edicts) - 1;
+	if (cl->chase_target && cl->chase_target->inuse) {
+		int cs_index = CS_GENERAL + (ent - g_edicts);
+		gi.configstring(cs_index, G_Fmt("Chasing {}", cl->chase_target->client->pers.netname).data());
+		cl->ps.stats[STAT_CHASE] = cs_index;
+	}
 	else
 		cl->ps.stats[STAT_CHASE] = 0;
 }

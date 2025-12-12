@@ -84,6 +84,75 @@ cvar_t* grapple_wall;
 static int	gib_queue;
 static int	moan[8];
 
+//==============================================================
+// Frozen Body Ghost Entity - for chase camera visibility
+//==============================================================
+
+void CreateFrozenBodyGhost(edict_t* ent)
+{
+	// Don't create if already exists or not frozen
+	if (ent->client->frozen_body || !ent->client->frozen)
+		return;
+
+	// Don't create for bots
+	if (ent->svflags & SVF_BOT)
+		return;
+
+	edict_t* ghost = G_Spawn();
+	if (!ghost)
+		return;
+
+	// Copy visual state from the frozen player
+	ghost->s = ent->s;
+	ghost->s.number = ghost - g_edicts;
+
+	// Set up as a intangible visual-only entity
+	ghost->classname = "frozen_body_ghost";
+	ghost->svflags = SVF_NONE;
+	ghost->solid = SOLID_NOT;
+	ghost->movetype = MOVETYPE_NONE;
+	ghost->takedamage = false;
+	ghost->owner = ent;
+
+	// Copy position and bounds
+	ghost->s.origin = ent->s.origin;
+	ghost->mins = ent->mins;
+	ghost->maxs = ent->maxs;
+
+	gi.linkentity(ghost);
+
+	ent->client->frozen_body = ghost;
+}
+
+void UpdateFrozenBodyGhost(edict_t* ent)
+{
+	if (!ent->client->frozen_body)
+		return;
+
+	edict_t* ghost = ent->client->frozen_body;
+
+	// Keep the ghost synced with the player's frozen state
+	ghost->s.origin = ent->s.origin;
+	ghost->s.angles = ent->s.angles;
+	ghost->s.frame = ent->s.frame;
+	ghost->s.skinnum = ent->s.skinnum;
+	ghost->s.effects = ent->s.effects;
+	ghost->s.renderfx = ent->s.renderfx;
+	ghost->s.modelindex = ent->s.modelindex;
+
+	gi.linkentity(ghost);
+}
+
+void RemoveFrozenBodyGhost(edict_t* ent)
+{
+	if (!ent->client->frozen_body)
+		return;
+
+	G_FreeEdict(ent->client->frozen_body);
+	ent->client->frozen_body = nullptr;
+}
+//==============================================================
+
 void putInventory(const char* s, edict_t* ent)
 {
 	gitem_t* item = nullptr;
@@ -500,6 +569,11 @@ void playerBreak(edict_t* ent, int force)
 	ent->client->frozen = false;
 	freeze[get_team_int(ent->client->resp.ctf_team)].update = true;
 	ent->client->ps.stats[STAT_CHASE] = 0;
+
+	// Clean up ghost entity and restore visibility
+	RemoveFrozenBodyGhost(ent);
+	ent->svflags &= ~SVF_NOCLIENT;
+
 	if (ent->client->bot_helper) {
 		ent->client->bot_helper->client->bot_helper = nullptr;
 		ent->client->bot_helper = nullptr;
@@ -585,6 +659,10 @@ void freezeMain(edict_t* ent)
 		playerBotHelper(ent);
 		playerThaw(ent);
 		playerUnfreeze(ent);
+
+		// Update chase camera for frozen players
+		if (ent->client->chase_target)
+			UpdateChaseCam(ent);
 	}
 	else if (ent->health > 0)
 		playerMove(ent);

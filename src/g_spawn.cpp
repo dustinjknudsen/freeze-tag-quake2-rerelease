@@ -1349,38 +1349,36 @@ static void G_InitStatusbar()
 	else if (G_TeamplayEnabled())
 	{
 		CTFPrecache();
-
 		// ctf/tdm
 		// red team
 		sb.yb(-110).ifstat(STAT_CTF_TEAM1_PIC).xr(-26).pic(STAT_CTF_TEAM1_PIC).endifstat().xr(-78).num(3, STAT_CTF_TEAM1_CAPS);
 		// joined overlay
 		sb.ifstat(STAT_CTF_JOINED_TEAM1_PIC).yb(-112).xr(-28).pic(STAT_CTF_JOINED_TEAM1_PIC).endifstat();
-
 		// blue team
 		sb.yb(-83).ifstat(STAT_CTF_TEAM2_PIC).xr(-26).pic(STAT_CTF_TEAM2_PIC).endifstat().xr(-78).num(3, STAT_CTF_TEAM2_CAPS);
 		// joined overlay
 		sb.ifstat(STAT_CTF_JOINED_TEAM2_PIC).yb(-85).xr(-28).pic(STAT_CTF_JOINED_TEAM2_PIC).endifstat();
-
 		if (ctf->integer)
 		{
 			// have flag graph
 			sb.ifstat(STAT_CTF_FLAG_PIC).yt(26).xr(-24).pic(STAT_CTF_FLAG_PIC).endifstat();
 		}
-
 		// id view state
 		sb.ifstat(STAT_CTF_ID_VIEW).xv(112).yb(-58).stat_pname(STAT_CTF_ID_VIEW).endifstat();
-
 		// id view color
 		sb.ifstat(STAT_CTF_ID_VIEW_COLOR).xv(96).yb(-58).pic(STAT_CTF_ID_VIEW_COLOR).endifstat();
-
 		if (ctf->integer)
 		{
 			// match
 			sb.ifstat(STAT_CTF_MATCH).xl(0).yb(-78).stat_string(STAT_CTF_MATCH).endifstat();
 		}
-
 		// team info
 		sb.ifstat(STAT_CTF_TEAMINFO).xl(0).yb(-88).stat_string(STAT_CTF_TEAMINFO).endifstat();
+
+		// Chase target display (for frozen players and spectators)
+		sb.ifstat(STAT_CHASE).xv(0).yb(-68).stat_string(STAT_CHASE).endifstat();
+		// spectator
+		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).string2("SPECTATOR MODE").endifstat();
 	}
 	else
 	{ 
@@ -1388,11 +1386,14 @@ static void G_InitStatusbar()
 		// frags
 		sb.xr(-50).yt(2).num(3, STAT_FRAGS);
 
+		// Chase target display 
+		sb.ifstat(STAT_CHASE).xv(0).yb(-68).stat_string(STAT_CHASE).endifstat();
+
 		// spectator
 		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).string2("SPECTATOR MODE").endifstat();
 
 		// chase cam
-		sb.ifstat(STAT_CHASE).xv(0).yb(-68).string("CHASING").xv(64).stat_string(STAT_CHASE).endifstat();
+		//sb.ifstat(STAT_CHASE).xv(0).yb(-68).string("CHASING").xv(64).stat_string(STAT_CHASE).endifstat();
 	}
 
 	// ---- more shared stuff ----
