@@ -71,7 +71,7 @@ enum
 	CONFIG_HEALTH_BAR_NAME, // active health bar name
 
 	CONFIG_STORY,
-
+	CONFIG_FT_VIEWED_STRING,
 	CONFIG_LAST
 };
 
@@ -258,6 +258,8 @@ enum player_stat_t
 	STAT_HEALTH_BARS, // two health bar values; 7 bits for value, 1 bit for active
 	// [Paril-KEX]
 	STAT_ACTIVE_WEAPON,
+
+	STAT_FT_VIEWED,
 
 	// don't use; just for verification
     STAT_LAST

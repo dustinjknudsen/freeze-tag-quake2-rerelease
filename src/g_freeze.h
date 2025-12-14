@@ -86,6 +86,7 @@ void freezeAnim(edict_t* ent);   // Sets player animation upon freezing
 void cmdMoan(edict_t* ent);      // Triggers the "Help me!" sound/message for frozen players
 void playerShell(edict_t* ent, ctfteam_t team); // Applies the team-colored ice shell effect
 void freezeEffects(edict_t* ent); // Updates effects like thaw pulse or solid shell
+void FreezeScoreboardMessage(edict_t* ent, edict_t* killer);
 
 //================================================================================================
 // SECTION 7: GIB/SHATTER LOGIC
@@ -100,7 +101,8 @@ void gibThink(edict_t* ent); // Frees the memory for a gib entity
 
 void freezeBotHelper(); // Function related to bot logic/management
 void freezeBotHook();
-void freezeBotItemHook();
+//void freezeBotItemHook();
+// 
 //================================================================================================
 // SECTION 9: GRAPPLE HOOK DYNAMICS
 //================================================================================================

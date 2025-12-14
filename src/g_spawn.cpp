@@ -1375,6 +1375,8 @@ static void G_InitStatusbar()
 		// team info
 		sb.ifstat(STAT_CTF_TEAMINFO).xl(0).yb(-88).stat_string(STAT_CTF_TEAMINFO).endifstat();
 
+		// Viewing display (for frozen players and spectators) - who chase target is looking at
+		sb.ifstat(STAT_FT_VIEWED).xv(0).yb(-78).stat_string(STAT_FT_VIEWED).endifstat();
 		// Chase target display (for frozen players and spectators)
 		sb.ifstat(STAT_CHASE).xv(0).yb(-68).stat_string(STAT_CHASE).endifstat();
 		// spectator
@@ -1385,6 +1387,9 @@ static void G_InitStatusbar()
 		// dm
 		// frags
 		sb.xr(-50).yt(2).num(3, STAT_FRAGS);
+
+		// Viewing display (for frozen players and spectators)
+		sb.ifstat(STAT_FT_VIEWED).xv(0).yb(-78).stat_string(STAT_FT_VIEWED).endifstat();
 
 		// Chase target display 
 		sb.ifstat(STAT_CHASE).xv(0).yb(-68).stat_string(STAT_CHASE).endifstat();

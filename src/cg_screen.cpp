@@ -772,6 +772,111 @@ static void CG_DrawTable(int x, int y, uint32_t width, uint32_t height, int32_t 
     }
 }
 
+// [Freeze Tag] Custom Scoreboard Drawer
+static void CG_DrawFreezeScoreboard(const char** s, int x, int y, int scale)
+{
+    int client_idx, score, frags, thaws, ping, is_frozen, team_idx;
+    int total_players;
+    const char* token;
+
+    // Configuration for the look
+    int row_height = 10 * scale;
+    int header_height = 14 * scale;
+    int col_width_name = 150 * scale;
+    int col_width_stat = 40 * scale;
+    int table_width = col_width_name + (col_width_stat * 4);
+
+    // Team Colors (RGBA)
+    rgba_t color_red_header = { 180, 40, 40, 200 };
+    rgba_t color_blu_header = { 40, 40, 180, 200 };
+    rgba_t color_spe_header = { 60, 60, 60, 200 };
+    rgba_t color_row_bg = { 20, 20, 20, 150 };
+
+    // Parse total number of players to draw
+    token = COM_Parse(s);
+    if (!token[0]) return;
+    total_players = atoi(token);
+
+    int current_y = y;
+    int current_team = -1;
+
+    for (int i = 0; i < total_players; i++)
+    {
+        // Parse Player Data Stream
+        token = COM_Parse(s); client_idx = atoi(token);
+        token = COM_Parse(s); score = atoi(token);
+        token = COM_Parse(s); frags = atoi(token);
+        token = COM_Parse(s); thaws = atoi(token);
+        token = COM_Parse(s); ping = atoi(token);
+        token = COM_Parse(s); is_frozen = atoi(token);
+        token = COM_Parse(s); team_idx = atoi(token); // 1=Red, 2=Blue, 0=Spec
+
+        // -- DRAW TEAM HEADER (If team changed) --
+        if (team_idx != current_team)
+        {
+            current_team = team_idx;
+            rgba_t* header_col = &color_spe_header;
+            const char* team_name = "SPECTATORS";
+
+            if (team_idx == 1) { header_col = &color_red_header; team_name = "RED TEAM"; }
+            else if (team_idx == 2) { header_col = &color_blu_header; team_name = "BLUE TEAM"; }
+
+            current_y += 4 * scale; // Spacing
+
+            // Draw Header Bar
+            cgi.SCR_DrawColorPic(x, current_y, table_width, header_height, "_white", *header_col);
+
+            // Draw Header Text
+            cgi.SCR_DrawFontString(team_name, x + (4 * scale), current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT);
+
+            // Draw Column Headers
+            int h_x = x + col_width_name;
+            cgi.SCR_DrawFontString("SCR", h_x, current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
+            cgi.SCR_DrawFontString("FRG", h_x, current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
+            cgi.SCR_DrawFontString("THW", h_x, current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
+            cgi.SCR_DrawFontString("PNG", h_x, current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT);
+
+            current_y += header_height;
+        }
+
+        // -- DRAW PLAYER ROW --
+
+        // Background Row
+        cgi.SCR_DrawColorPic(x, current_y, table_width, row_height, "_white", color_row_bg);
+
+        // Name (Looked up locally!)
+        const char* name = cgi.CL_GetClientName(client_idx);
+
+        // Truncate long names
+        static char truncated_name[21];
+        int max_chars = 17; // Adjust this for desired max length
+        if (strlen(name) > max_chars)
+        {
+            strncpy(truncated_name, name, max_chars - 3);
+            truncated_name[max_chars - 3] = ' ';
+            truncated_name[max_chars - 2] = '.';
+            truncated_name[max_chars - 1] = '.';
+            truncated_name[max_chars] = '\0';
+            name = truncated_name;
+        }
+
+        // Color logic: Frozen = Blue, Alive = White
+        rgba_t name_color = is_frozen ? rgba_t{ 100, 100, 255, 255 } : rgba_white;
+
+        // Draw Name
+        cgi.SCR_DrawFontString(name, x + (4 * scale), current_y + (-0.5 * scale), scale, name_color, true, text_align_t::LEFT);
+
+        // Draw Stats
+        int s_x = x + col_width_name;
+        cgi.SCR_DrawFontString(G_Fmt("{}", score).data(), s_x, current_y, scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
+        cgi.SCR_DrawFontString(G_Fmt("{}", frags).data(), s_x, current_y, scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
+        cgi.SCR_DrawFontString(G_Fmt("{}", thaws).data(), s_x, current_y, scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
+        cgi.SCR_DrawFontString(G_Fmt("{}", ping).data(), s_x, current_y, scale, rgba_white, true, text_align_t::LEFT);
+
+        current_y += row_height + (1 * scale); // 1 pixel gap
+    }
+}
+
 /*
 ================
 CG_ExecuteLayoutString
@@ -808,6 +913,24 @@ static void CG_ExecuteLayoutString (const char *s, vrect_t hud_vrect, vrect_t hu
     while (s)
     {
         token = COM_Parse (&s);
+        // [Freeze Tag] Custom Scoreboard
+        if (!strcmp(token, "freeze_sb"))
+        {
+            if (!skip_depth)
+                CG_DrawFreezeScoreboard(&s, x, y, scale);
+            else
+            {
+                // Still need to parse through the data even if skipping
+                token = COM_Parse(&s);
+                int total = atoi(token);
+                for (int i = 0; i < total; i++)
+                {
+                    for (int j = 0; j < 7; j++) // 7 values per player
+                        COM_Parse(&s);
+                }
+            }
+            continue;
+        }
         if (!strcmp(token, "xl"))
         {
             token = COM_Parse (&s);

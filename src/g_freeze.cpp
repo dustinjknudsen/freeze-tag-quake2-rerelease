@@ -153,8 +153,6 @@ void RemoveFrozenBodyGhost(edict_t* ent)
 }
 //==============================================================
 
-
-
 //==============================================================
 // Bot Grappling Hook for Frozen Body Rescue
 //==============================================================
@@ -469,235 +467,6 @@ void freezeBotHook()
 				bot->client->hookstate = 0;
 				bot->client->hook_rescue_state = RESCUE_NONE;
 				bot->client->hook_rescue_time = level.time + 1_sec; // Short cooldown after success
-			}
-			break;
-		}
-		}
-	}
-}
-
-//==============================================================
-
-// Check if bot can see and hook near an item
-bool BotCanHookToItem(edict_t* bot, edict_t* item)
-{
-	// Check distance - not too close, not too far
-	float dist = (bot->s.origin - item->s.origin).length();
-	if (dist < 200 || dist > hook_max_len->value * 0.8f)
-		return false;
-
-	// Check if item is above us (worth hooking to reach)
-	if (item->s.origin[2] < bot->s.origin[2] + 32)
-		return false;
-
-	// Find a wall/ceiling point above the item to hook
-	vec3_t hook_target = item->s.origin;
-	hook_target[2] += 64; // Aim above the item
-
-	trace_t trace = gi.traceline(bot->s.origin, hook_target, bot, MASK_SOLID);
-
-	// Need to hit a wall/ceiling near the item
-	if (trace.fraction == 1.0f)
-		return false;
-
-	return true;
-}
-
-// Find a desirable item (armor, megahealth) that requires hooking
-edict_t* BotFindHookableItem(edict_t* bot)
-{
-	edict_t* best_item = nullptr;
-	float best_dist = 99999;
-
-	for (int i = 0; i < globals.num_edicts; i++)
-	{
-		edict_t* ent = &g_edicts[i];
-
-		if (!ent->inuse)
-			continue;
-
-		// Check if it's a desirable item
-		bool is_desirable = false;
-
-		if (ent->item)
-		{
-			// Megahealth
-			if (ent->item->id == IT_HEALTH_MEGA)
-				is_desirable = true;
-			// Body armor
-			else if (ent->item->id == IT_ARMOR_BODY)
-				is_desirable = true;
-			// Combat armor
-			else if (ent->item->id == IT_ARMOR_COMBAT)
-				is_desirable = true;
-		}
-
-		if (!is_desirable)
-			continue;
-
-		if (!BotCanHookToItem(bot, ent))
-			continue;
-
-		float dist = (bot->s.origin - ent->s.origin).length();
-		if (dist < best_dist)
-		{
-			best_dist = dist;
-			best_item = ent;
-		}
-	}
-
-	return best_item;
-}
-
-// Calculate aim point above item
-void BotCalculateItemHookAim(edict_t* bot, edict_t* item, vec3_t& out_angles)
-{
-	vec3_t target = item->s.origin;
-	target[2] += 64; // Aim above the item
-
-	// Trace to find the actual wall/ceiling
-	trace_t trace = gi.traceline(bot->s.origin, target, bot, MASK_SOLID);
-
-	vec3_t aim_point = trace.endpos;
-	aim_point[2] -= 2; // Slightly below the ceiling hit point
-
-	vec3_t start;
-	start = bot->s.origin;
-	start[2] += bot->viewheight - 8;
-
-	vec3_t aim_dir;
-	VectorSubtract(aim_point, start, aim_dir);
-	VectorNormalize(aim_dir);
-
-	out_angles = vectoangles(aim_dir);
-	out_angles[PITCH] += 1.0f; // Slight adjustment
-}
-
-void freezeBotItemHook()
-{
-	edict_t* bot;
-
-	for (uint32_t i = 0; i < game.maxclients; i++)
-	{
-		bot = g_edicts + 1 + i;
-
-		// Skip non-bots and invalid states
-		if (!bot->inuse)
-			continue;
-		if (!(bot->svflags & SVF_BOT))
-			continue;
-		if (bot->client->resp.spectator)
-			continue;
-		if (bot->health <= 0)
-			continue;
-		if (bot->client->frozen)
-			continue;
-
-		// Don't item hook if we're doing a rescue
-		if (bot->client->hook_rescue_state != RESCUE_NONE)
-			continue;
-
-		// Already have a hook out
-		if (bot->client->hookstate & hook_on)
-			continue;
-
-		// Cooldown check
-		if (bot->client->item_hook_state == ITEM_HOOK_NONE &&
-			bot->client->item_hook_time > level.time)
-			continue;
-
-		// Find a hookable item
-		edict_t* target_item = BotFindHookableItem(bot);
-
-		if (!target_item)
-		{
-			bot->client->item_hook_state = ITEM_HOOK_NONE;
-			continue;
-		}
-
-		// State machine similar to rescue hook
-		switch (bot->client->item_hook_state)
-		{
-		case ITEM_HOOK_NONE:
-			bot->client->item_hook_target = target_item;
-			bot->client->item_hook_state = ITEM_HOOK_STOPPING;
-			bot->client->item_hook_time = level.time + 500_ms;
-			break;
-
-		case ITEM_HOOK_STOPPING:
-			BotStopMovement(bot);
-			if (BotIsStationary(bot) || level.time > bot->client->item_hook_time)
-			{
-				bot->client->item_hook_state = ITEM_HOOK_AIMING;
-				bot->client->item_hook_time = level.time + 300_ms;
-			}
-			break;
-
-		case ITEM_HOOK_AIMING:
-		{
-			BotStopMovement(bot);
-
-			vec3_t aim_angles;
-			BotCalculateItemHookAim(bot, bot->client->item_hook_target, aim_angles);
-			bot->s.angles[YAW] = aim_angles[YAW];
-			bot->s.angles[PITCH] = 0;
-			bot->client->v_angle = aim_angles;
-			bot->client->ps.viewangles = aim_angles;
-
-			if (level.time > bot->client->item_hook_time)
-			{
-				BotCalculateItemHookAim(bot, bot->client->item_hook_target, aim_angles);
-				bot->s.angles[YAW] = aim_angles[YAW];
-				bot->s.angles[PITCH] = 0;
-				bot->client->v_angle = aim_angles;
-				bot->client->ps.viewangles = aim_angles;
-
-				bot->client->hookstate = hook_on;
-				firehook(bot);
-
-				bot->client->item_hook_state = ITEM_HOOK_FIRING;
-				bot->client->item_hook_time = level.time + 2_sec;
-			}
-			break;
-		}
-
-		case ITEM_HOOK_FIRING:
-			bot->s.angles[PITCH] = 0;
-
-			if (bot->client->hookstate & hook_in)
-			{
-				bot->client->item_hook_state = ITEM_HOOK_SWINGING;
-				bot->client->item_hook_time = level.time + 3_sec; // Swing for up to 3 seconds
-			}
-			else if (!(bot->client->hookstate & hook_on) || level.time > bot->client->item_hook_time)
-			{
-				bot->client->item_hook_state = ITEM_HOOK_NONE;
-				bot->client->item_hook_time = level.time + 5_sec; // Cooldown
-			}
-			break;
-
-		case ITEM_HOOK_SWINGING:
-		{
-			bot->s.angles[PITCH] = 0;
-
-			if (!(bot->client->hookstate & hook_on))
-			{
-				bot->client->item_hook_state = ITEM_HOOK_NONE;
-				bot->client->item_hook_time = level.time + 2_sec;
-				break;
-			}
-
-			// Reel in to swing toward item
-			bot->client->hookstate |= shrink_on;
-			bot->client->hookstate &= ~grow_on;
-
-			// Check if close to item or timeout
-			float dist = (bot->s.origin - bot->client->item_hook_target->s.origin).length();
-			if (dist < 64 || level.time > bot->client->item_hook_time)
-			{
-				bot->client->hookstate = 0;
-				bot->client->item_hook_state = ITEM_HOOK_NONE;
-				bot->client->item_hook_time = level.time + 3_sec;
 			}
 			break;
 		}
@@ -1420,6 +1189,103 @@ void freezeEffects(edict_t* ent)
 		playerShell(ent, ent->client->resp.ctf_team);
 }
 
+void FreezeScoreboardMessage(edict_t* ent, edict_t* killer)
+{
+	if (!ent || !ent->client) return;
+
+	struct ScoreboardPlayer {
+		int  client_num;
+		int  team;
+		int  frags;
+		int  thaws;
+		int  score;
+		int  ping;
+		bool is_frozen;
+		bool is_spectator;
+	};
+
+	std::vector<ScoreboardPlayer> all_players;
+	all_players.reserve(game.maxclients);
+
+	for (uint32_t i = 0; i < game.maxclients; i++) {
+		edict_t* p_ent = g_edicts + 1 + i;
+		if (!p_ent->inuse || !p_ent->client || !p_ent->client->pers.connected)
+			continue;
+
+		gclient_t* client = p_ent->client;
+
+		int team_id = 0;
+		if (client->resp.ctf_team == CTF_TEAM1)
+			team_id = 1;
+		else if (client->resp.ctf_team == CTF_TEAM2)
+			team_id = 2;
+
+		all_players.push_back({
+			(int)i,
+			team_id,
+			client->resp.score,
+			0,  // thaws - replace with client->resp.thaws if you add it
+			client->resp.score,
+			client->ping,
+			client->frozen ? true : false,
+			client->resp.spectator ? true : false
+			});
+	}
+
+	// Sort by team, then score
+	std::sort(all_players.begin(), all_players.end(), [](const ScoreboardPlayer& a, const ScoreboardPlayer& b) {
+		int teamA = (a.team == 0) ? 99 : a.team;
+		int teamB = (b.team == 0) ? 99 : b.team;
+		if (teamA != teamB) return teamA < teamB;
+		return a.score > b.score;
+		});
+
+	// Build string
+	static std::string string;
+	string.clear();
+
+	// Header
+	if (capturelimit->integer) {
+		fmt::format_to(std::back_inserter(string), FMT_STRING("xl 3 yv -47 loc_string2 1 $g_score_captures \"{}\" "), capturelimit->integer);
+	}
+	if (timelimit->value) {
+		int frames_left = gi.ServerFrame() + ((gtime_t::from_min(timelimit->value) - level.time)).milliseconds() / gi.frame_time_ms;
+		fmt::format_to(std::back_inserter(string), FMT_STRING("xl 310 yv -47 time_limit {} "), frames_left);
+	}
+
+	/*
+	Layout position commands :
+
+		xv / yv = relative to screen center
+		xl / yt = relative to left / top edge
+		xr / yb = relative to right / bottom edge
+
+	*/
+
+	// freeze_sb command
+	fmt::format_to(std::back_inserter(string), FMT_STRING("xl 2 yv -40 freeze_sb {} "), all_players.size()); // adjust this to move scoreboard around
+
+	for (const auto& p : all_players) {
+		if (string.size() > 1300) break;
+
+		int team_id = p.team;
+		if (p.is_spectator) team_id = 0;
+
+		fmt::format_to(std::back_inserter(string), FMT_STRING("{} {} {} {} {} {} {} "),
+			p.client_num,
+			p.score,
+			p.frags,
+			p.thaws,
+			p.ping,
+			p.is_frozen ? 1 : 0,
+			team_id
+		);
+	}
+
+	gi.WriteByte(svc_layout);
+	gi.WriteString(string.c_str());
+}
+
 void p_projectsourcereverse(gclient_t* client, vec3_t point, vec3_t distance, vec3_t forward, vec3_t right, vec3_t& result)
 {
 	vec3_t	_distance;
@@ -1797,9 +1663,9 @@ void freezeSpawn()
 void cvarFreeze()
 {
 	hook_max_len = gi.cvar("hook_max_len", "1000", CVAR_NOFLAGS);
-	hook_rpf = gi.cvar("hook_rpf", "20", CVAR_NOFLAGS);
+	hook_rpf = gi.cvar("hook_rpf", "19", CVAR_NOFLAGS);
 	hook_min_len = gi.cvar("hook_min_len", "40", CVAR_NOFLAGS);
-	hook_speed = gi.cvar("hook_speed", "980", CVAR_NOFLAGS);
+	hook_speed = gi.cvar("hook_speed", "973", CVAR_NOFLAGS);
 	frozen_time = gi.cvar("frozen_time", "180", CVAR_NOFLAGS);
 	start_weapon = gi.cvar("start_weapon", "0", CVAR_NOFLAGS);
 	start_armor = gi.cvar("start_armor", "0", CVAR_NOFLAGS);
