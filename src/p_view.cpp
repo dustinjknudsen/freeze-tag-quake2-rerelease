@@ -1440,7 +1440,10 @@ void ClientEndServerFrame(edict_t *ent)
 	// set model angles from view angles so other things in
 	// the world can tell which direction you are looking
 	//
-	if (ent->client->v_angle[PITCH] > 180)
+// freeze - don't tilt bot models when they're aiming hook
+	if ((ent->svflags & SVF_BOT) && ent->client->hook_rescue_state >= RESCUE_AIMING)
+		ent->s.angles[PITCH] = 0;
+	else if (ent->client->v_angle[PITCH] > 180)
 		ent->s.angles[PITCH] = (-360 + ent->client->v_angle[PITCH]) / 3;
 	else
 		ent->s.angles[PITCH] = ent->client->v_angle[PITCH] / 3;
@@ -1484,8 +1487,9 @@ void ClientEndServerFrame(edict_t *ent)
 	// apply all the damage taken this frame
 	P_DamageFeedback(ent);
 
-	// determine the view offsets
-	SV_CalcViewOffset(ent);
+	// determine the view offsets (skip for spectators/frozen players in chase mode)
+	if (!(ent->client->chase_target && (ent->client->resp.spectator || ent->client->frozen)))
+		SV_CalcViewOffset(ent);
 
 	// determine the gun offsets
 	SV_CalcGunOffset(ent);

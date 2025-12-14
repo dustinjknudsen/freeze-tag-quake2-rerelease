@@ -2804,9 +2804,9 @@ static void CTFNoChaseCamUpdate(edict_t *ent)
 	SetLevelName(&entries[jmenu_level]);
 }
 
-void CTFChaseCam(edict_t *ent, pmenuhnd_t *p)
+void CTFChaseCam(edict_t* ent, pmenuhnd_t* p)
 {
-	edict_t *e;
+	edict_t* e;
 
 	CTFJoinTeam(ent, CTF_NOTEAM);
 
@@ -2823,9 +2823,17 @@ void CTFChaseCam(edict_t *ent, pmenuhnd_t *p)
 		e = g_edicts + i;
 		if (e->inuse && e->solid != SOLID_NOT)
 		{
+			// Clear stale view data before first chase
+			ent->viewheight = 0;
+			ent->client->ps.pmove.viewheight = 0;
+			ent->client->ps.viewoffset = {};
+			ent->client->ps.pmove.origin = e->s.origin;
+			ent->s.origin = e->s.origin;
+
 			ent->client->chase_target = e;
 			PMenu_Close(ent);
 			ent->client->update_chase = true;
+			UpdateChaseCam(ent);  // Call immediately to set up view correctly
 			return;
 		}
 	}

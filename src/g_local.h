@@ -3020,8 +3020,14 @@ struct gclient_t
 	gtime_t	frozen_time;
 	edict_t* frozen_body;
 	int	hookstate;
+	int         item_hook_state;
+	gtime_t     item_hook_time;
+	edict_t* item_hook_target;
+	gtime_t     hook_wall_time;
 	int	hooker;
 	gtime_t	moan_time;
+	int	hook_rescue_state;
+	gtime_t hook_rescue_time;
 	/* freeze */
 };
 

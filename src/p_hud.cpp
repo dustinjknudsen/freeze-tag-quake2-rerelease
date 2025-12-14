@@ -1135,7 +1135,7 @@ void G_SetSpectatorStats(edict_t* ent)
 		cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
 	if (cl->chase_target && cl->chase_target->inuse) {
 		int cs_index = CS_GENERAL + (ent - g_edicts);
-		gi.configstring(cs_index, G_Fmt("Chasing {}", cl->chase_target->client->pers.netname).data());
+		gi.configstring(cs_index, G_Fmt("Chasing '{}'", cl->chase_target->client->pers.netname).data());
 		cl->ps.stats[STAT_CHASE] = cs_index;
 	}
 	else

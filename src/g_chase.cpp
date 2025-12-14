@@ -32,6 +32,10 @@ void UpdateChaseCam(edict_t* ent)
 	ownerv = targ->s.origin;
 	oldgoal = ent->s.origin;
 
+	// On first chase frame, use target's origin as starting point
+	if (oldgoal == vec3_origin || ent->client->update_chase)
+		oldgoal = targ->s.origin;
+
 	ownerv[2] += targ->viewheight;
 
 	angles = targ->client->v_angle;
@@ -76,12 +80,6 @@ void UpdateChaseCam(edict_t* ent)
 		goal[2] += 6;
 	}
 
-	//// Show chase target name when switching
-	//if (ent->client->update_chase) {
-	//	gi.Center_Print(ent, "Chasing: {}", targ->client->pers.netname);
-	//	ent->client->update_chase = false;
-	//}
-
 	if (ent->client->frozen) {
 		// Create ghost if it doesn't exist
 		CreateFrozenBodyGhost(ent);
@@ -96,7 +94,6 @@ void UpdateChaseCam(edict_t* ent)
 		ent->client->ps.pmove.origin = goal;
 		ent->client->ps.pmove.pm_type = PM_SPECTATOR;
 		ent->client->ps.viewoffset = {};
-
 	}
 	else {
 		if (targ->deadflag)
@@ -105,6 +102,8 @@ void UpdateChaseCam(edict_t* ent)
 			ent->client->ps.pmove.pm_type = PM_FREEZE;
 
 		ent->s.origin = goal;
+		ent->client->ps.pmove.origin = goal;
+		ent->client->ps.viewoffset = {};
 	}
 
 	ent->client->ps.pmove.delta_angles = targ->client->v_angle - ent->client->resp.cmd_angles;
@@ -120,7 +119,11 @@ void UpdateChaseCam(edict_t* ent)
 		ent->client->ps.viewangles = targ->client->v_angle;
 		ent->client->ps.viewangles[ROLL] = 0;  // Keep camera level
 
-		ent->client->v_angle = targ->client->v_angle;
+		// Keep camera pitch level when following a bot doing hook rescue
+		if ((targ->svflags & SVF_BOT) && targ->client->hook_rescue_state >= RESCUE_AIMING)
+			ent->client->ps.viewangles[PITCH] = 0;
+
+		ent->client->v_angle = ent->client->ps.viewangles;
 		AngleVectors(ent->client->v_angle, ent->client->v_forward, nullptr, nullptr);
 	}
 
@@ -216,34 +219,41 @@ void ChasePrev(edict_t *ent)
 	ent->client->update_chase = true;
 }
 
-void GetChaseTarget(edict_t *ent)
+void GetChaseTarget(edict_t* ent)
 {
-	/* freeze
-	uint32_t i;
-	edict_t *other;
+	//gi.Com_PrintFmt("GetChaseTarget called\n");
 
-	for (i = 1; i <= game.maxclients; i++)
-	{
-		other = g_edicts + i;
-		if (other->inuse && !other->client->resp.spectator)
-		{
-			ent->client->chase_target = other;
-			ent->client->update_chase = true;
-			UpdateChaseCam(ent);
-			return;
-		}
-	}
-	freeze */
 	ChaseNext(ent);
 
-	if (ent->client->chase_target)
-		UpdateChaseCam(ent);
-	else
-	/* freeze */
+	//gi.Com_PrintFmt("After ChaseNext, chase_target={}\n",
+	//	ent->client->chase_target ? "valid" : "null");
 
-	if (ent->client->chase_msg_time <= level.time)
+	if (ent->client->chase_target)
 	{
-		gi.LocCenter_Print(ent, "$g_no_players_chase");
-		ent->client->chase_msg_time = level.time + 5_sec;
+		//gi.Com_PrintFmt("BEFORE: viewheight={}, pmove.viewheight={}, viewoffset[2]={}\n",
+		//	ent->viewheight,
+		//	ent->client->ps.pmove.viewheight,
+		//	ent->client->ps.viewoffset[2]);
+
+		// Clear stale view data before first chase
+		ent->viewheight = 0;
+		ent->client->ps.pmove.viewheight = 0;
+		ent->client->ps.viewoffset = {};
+		ent->client->ps.pmove.origin = ent->client->chase_target->s.origin;
+		ent->s.origin = ent->client->chase_target->s.origin;
+
+		UpdateChaseCam(ent);
+
+		//gi.Com_PrintFmt("AFTER: viewheight={}, pmove.viewheight={}, viewoffset[2]={}\n",
+		//	ent->viewheight,
+		//	ent->client->ps.pmove.viewheight,
+		//	ent->client->ps.viewoffset[2]);
 	}
+	else
+
+		if (ent->client->chase_msg_time <= level.time)
+		{
+			gi.LocCenter_Print(ent, "$g_no_players_chase");
+			ent->client->chase_msg_time = level.time + 5_sec;
+		}
 }

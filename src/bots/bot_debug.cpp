@@ -164,6 +164,8 @@ Bot_UpdateDebug
 void Bot_UpdateDebug() {
 	/* freeze */
 	freezeBotHelper();
+	freezeBotHook();
+	freezeBotItemHook();
 	/* freeze */
 	if ( !sv_cheats->integer ) {
 		return;

@@ -2291,6 +2291,12 @@ void PutClientInServer(edict_t *ent)
 		ent->svflags |= SVF_NOCLIENT;
 		ent->client->ps.gunindex = 0;
 		ent->client->ps.gunskin = 0;
+
+		// Clear view height for spectators
+		ent->viewheight = 0;
+		ent->client->ps.pmove.viewheight = 0;
+		ent->client->ps.viewoffset = {};
+
 		gi.linkentity(ent);
 		return;
 	}
