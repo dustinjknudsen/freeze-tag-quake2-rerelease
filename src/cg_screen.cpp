@@ -789,6 +789,8 @@ static void CG_DrawFreezeScoreboard(const char** s, int x, int y, int scale)
     // Team Colors (RGBA)
     rgba_t color_red_header = { 180, 40, 40, 200 };
     rgba_t color_blu_header = { 40, 40, 180, 200 };
+    rgba_t color_grn_header = { 40, 180, 40, 200 };   // Green
+    rgba_t color_yel_header = { 180, 180, 40, 200 }; // Yellow
     rgba_t color_spe_header = { 60, 60, 60, 200 };
     rgba_t color_row_bg = { 20, 20, 20, 150 };
 
@@ -809,7 +811,7 @@ static void CG_DrawFreezeScoreboard(const char** s, int x, int y, int scale)
         token = COM_Parse(s); thaws = atoi(token);
         token = COM_Parse(s); ping = atoi(token);
         token = COM_Parse(s); is_frozen = atoi(token);
-        token = COM_Parse(s); team_idx = atoi(token); // 1=Red, 2=Blue, 0=Spec
+        token = COM_Parse(s); team_idx = atoi(token); // 1=Red, 2=Blue, 3=Green, 4=Yellow, 0=Spec
 
         // -- DRAW TEAM HEADER (If team changed) --
         if (team_idx != current_team)
@@ -820,6 +822,8 @@ static void CG_DrawFreezeScoreboard(const char** s, int x, int y, int scale)
 
             if (team_idx == 1) { header_col = &color_red_header; team_name = "RED TEAM"; }
             else if (team_idx == 2) { header_col = &color_blu_header; team_name = "BLUE TEAM"; }
+            else if (team_idx == 3) { header_col = &color_grn_header; team_name = "GREEN TEAM"; }
+            else if (team_idx == 4) { header_col = &color_yel_header; team_name = "YELLOW TEAM"; }
 
             current_y += 4 * scale; // Spacing
 

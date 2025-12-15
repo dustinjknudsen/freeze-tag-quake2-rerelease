@@ -27,8 +27,8 @@ enum elect_t
 
 struct ctfgame_t
 {
-	int		team1, team2;
-	int		total1, total2; // these are only set when going into intermission except in teamplay
+	int		team1, team2, team3, team4;
+	int		total1, total2, total3, total4; // these are only set when going into intermission except in teamplay
 	gtime_t last_flag_capture;
 	int		last_capture_team;
 
@@ -68,14 +68,18 @@ void G_AdjustTeamScore(ctfteam_t team, int32_t offset)
 		ctfgame.total1 += offset;
 	else if (team == CTF_TEAM2)
 		ctfgame.total2 += offset;
+	else if (team == CTF_TEAM3) // Green
+		ctfgame.total3 += offset;
+	else if (team == CTF_TEAM4) // Yellow
+		ctfgame.total4 += offset;
 }
 
 /* freeze */
 int get_team_score(int i) {
-	if (i == 0)
-		return ctfgame.total1;
-	if (i == 1)
-		return ctfgame.total2;
+	if (i == 0) return ctfgame.total1;
+	if (i == 1) return ctfgame.total2;
+	if (i == 2) return ctfgame.total3;
+	if (i == 3) return ctfgame.total4;
 	return ctfgame.total2;
 }
 /* freeze */
@@ -251,14 +255,13 @@ const char *CTFTeamName(int team)
 {
 	switch (team)
 	{
-	case CTF_TEAM1:
-		return "RED";
-	case CTF_TEAM2:
-		return "BLUE";
-	case CTF_NOTEAM:
-		return "SPECTATOR";
+	case CTF_TEAM1: return "RED";
+	case CTF_TEAM2: return "BLUE";
+	case CTF_TEAM3: return "GREEN"; // New
+	case CTF_TEAM4: return "YELLOW"; // New
+	case CTF_NOTEAM: return "SPECTATOR";
 	}
-	return "UNKNOWN"; // Hanzo pointed out this was spelled wrong as "UKNOWN"
+	return "UNKNOWN";
 }
 
 const char *CTFOtherTeamName(int team)
@@ -269,7 +272,12 @@ const char *CTFOtherTeamName(int team)
 		return "BLUE";
 	case CTF_TEAM2:
 		return "RED";
+	case CTF_TEAM3:
+		return "GREEN";
+	case CTF_TEAM4:
+		return "YELLOW";
 	}
+
 	return "UNKNOWN"; // Hanzo pointed out this was spelled wrong as "UKNOWN"
 }
 
@@ -281,6 +289,10 @@ int CTFOtherTeam(int team)
 		return CTF_TEAM2;
 	case CTF_TEAM2:
 		return CTF_TEAM1;
+	case CTF_TEAM3:
+		return CTF_TEAM3;
+	case CTF_TEAM4:
+		return CTF_TEAM4;
 	}
 	return -1; // invalid value
 }
@@ -308,6 +320,14 @@ void CTFAssignSkin(edict_t *ent, const char *s)
 	case CTF_TEAM2:
 		t = G_Fmt("{}\\{}{}\\default", ent->client->pers.netname, t, CTF_TEAM2_SKIN);
 		break;
+	case CTF_TEAM3: // Green
+		// Assumes CTF_TEAM3_SKIN is defined in g_local.h (usually "green")
+		t = G_Fmt("{}\\{}{}\\default", ent->client->pers.netname, t, CTF_TEAM3_SKIN);
+		break;
+	case CTF_TEAM4: // Yellow
+		// Assumes CTF_TEAM4_SKIN is defined (usually "yellow" or "primary_red+secondary_green")
+		t = G_Fmt("{}\\{}{}\\default", ent->client->pers.netname, t, CTF_TEAM4_SKIN);
+		break;
 	default:
 		t = G_Fmt("{}\\{}\\default", ent->client->pers.netname, s);
 		break;
@@ -318,10 +338,10 @@ void CTFAssignSkin(edict_t *ent, const char *s)
 	//	gi.LocClient_Print(ent, PRINT_HIGH, "$g_assigned_team", ent->client->pers.netname);
 }
 
-void CTFAssignTeam(gclient_t *who)
+void CTFAssignTeam(gclient_t* who)
 {
-	edict_t *player;
-	uint32_t team1count = 0, team2count = 0;
+	edict_t* player;
+	uint32_t counts[4] = { 0, 0, 0, 0 };
 
 	who->resp.ctf_state = 0;
 
@@ -331,33 +351,52 @@ void CTFAssignTeam(gclient_t *who)
 		return;
 	}
 
+	// 1. Count current players
 	for (uint32_t i = 1; i <= game.maxclients; i++)
 	{
 		player = &g_edicts[i];
+		if (!player->inuse || player->client == who) continue;
 
-		if (!player->inuse || player->client == who)
-			continue;
+		int idx = -1;
+		if (player->client->resp.ctf_team == CTF_TEAM1) idx = 0;
+		else if (player->client->resp.ctf_team == CTF_TEAM2) idx = 1;
+		else if (player->client->resp.ctf_team == CTF_TEAM3) idx = 2;
+		else if (player->client->resp.ctf_team == CTF_TEAM4) idx = 3;
 
-		switch (player->client->resp.ctf_team)
-		{
-		case CTF_TEAM1:
-			team1count++;
-			break;
-		case CTF_TEAM2:
-			team2count++;
-			break;
-		default:
-			break;
+		if (idx != -1) counts[idx]++;
+	}
+
+	// 2. Determine which teams are valid candidates
+	bool green_valid = (counts[0] >= 5 && counts[1] >= 5);
+	bool yellow_valid = (green_valid && counts[2] >= 5);
+
+	// 3. Find smallest team (only among valid ones)
+	int smallest_count = counts[0];
+	ctfteam_t target_team = CTF_TEAM1;
+
+	// Compare Blue
+	if (counts[1] < smallest_count) {
+		smallest_count = counts[1];
+		target_team = CTF_TEAM2;
+	}
+
+	// Compare Green (Only if unlocked)
+	if (green_valid) {
+		if (counts[2] < smallest_count) {
+			smallest_count = counts[2];
+			target_team = CTF_TEAM3;
 		}
 	}
-	if (team1count < team2count)
-		who->resp.ctf_team = CTF_TEAM1;
-	else if (team2count < team1count)
-		who->resp.ctf_team = CTF_TEAM2;
-	else if (brandom())
-		who->resp.ctf_team = CTF_TEAM1;
-	else
-		who->resp.ctf_team = CTF_TEAM2;
+
+	// Compare Yellow (Only if unlocked)
+	if (yellow_valid) {
+		if (counts[3] < smallest_count) {
+			smallest_count = counts[3];
+			target_team = CTF_TEAM4;
+		}
+	}
+
+	who->resp.ctf_team = target_team;
 }
 
 /*
@@ -382,12 +421,10 @@ edict_t *SelectCTFSpawnPoint(edict_t *ent, bool force_spawn)
 
 	switch (ent->client->resp.ctf_team)
 	{
-	case CTF_TEAM1:
-		cname = "info_player_team1";
-		break;
-	case CTF_TEAM2:
-		cname = "info_player_team2";
-		break;
+	case CTF_TEAM1: cname = "info_player_team1"; break;
+	case CTF_TEAM2: cname = "info_player_team2"; break;
+	case CTF_TEAM3: cname = "info_player_team3"; break; // New
+	case CTF_TEAM4: cname = "info_player_team4"; break; // New
 	default:
 	{
 		select_spawn_result_t result = SelectDeathmatchSpawnPoint(g_dm_spawn_farthest->integer, force_spawn, true);
@@ -904,7 +941,7 @@ void CTFEffects(edict_t *player)
 // called when we enter the intermission
 void CTFCalcScores()
 {
-	ctfgame.total1 = ctfgame.total2 = 0;
+	ctfgame.total1 = ctfgame.total2 = ctfgame.total3 = ctfgame.total4 = 0;
 	for (uint32_t i = 0; i < game.maxclients; i++)
 	{
 		if (!g_edicts[i + 1].inuse)
@@ -913,6 +950,10 @@ void CTFCalcScores()
 			ctfgame.total1 += game.clients[i].resp.score;
 		else if (game.clients[i].resp.ctf_team == CTF_TEAM2)
 			ctfgame.total2 += game.clients[i].resp.score;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM3)
+			ctfgame.total3 += game.clients[i].resp.score;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM4)
+			ctfgame.total4 += game.clients[i].resp.score;
 	}
 }
 
@@ -1564,6 +1605,10 @@ void CTFTeam_f(edict_t *ent)
 		desired_team = CTF_TEAM1;
 	else if (Q_strcasecmp(t, "blue") == 0)
 		desired_team = CTF_TEAM2;
+	else if (Q_strcasecmp(t, "green") == 0)
+		desired_team = CTF_TEAM3;
+	else if (Q_strcasecmp(t, "yellow") == 0)
+		desired_team = CTF_TEAM4;
 	else
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_unknown_team", t);
@@ -1631,12 +1676,12 @@ CTFScoreboardMessage
 void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
 {
 	uint32_t   i, j, k, n;
-	uint32_t   sorted[2][MAX_CLIENTS];
-	int32_t    sortedscores[2][MAX_CLIENTS];
+	uint32_t   sorted[4][MAX_CLIENTS];
+	int32_t    sortedscores[4][MAX_CLIENTS];
 	int		   score;
-	uint32_t   total[2];
-	int        totalscore[2];
-	uint32_t   last[2];
+	uint32_t   total[4];
+	int        totalscore[4];
+	uint32_t   last[4];
 	gclient_t *cl;
 	edict_t	*cl_ent;
 	int		   team;
@@ -1650,12 +1695,11 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
 		cl_ent = g_edicts + 1 + i;
 		if (!cl_ent->inuse)
 			continue;
-		if (game.clients[i].resp.ctf_team == CTF_TEAM1)
-			team = 0;
-		else if (game.clients[i].resp.ctf_team == CTF_TEAM2)
-			team = 1;
-		else
-			continue; // unknown team?
+		if (game.clients[i].resp.ctf_team == CTF_TEAM1) team = 0;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM2) team = 1;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM3) team = 2;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM4) team = 3;
+		else continue;
 
 		score = game.clients[i].resp.score;
 		for (j = 0; j < total[team]; j++)
@@ -2715,6 +2759,8 @@ bool CTFMatchOn()
 
 void CTFJoinTeam1(edict_t *ent, pmenuhnd_t *p);
 void CTFJoinTeam2(edict_t *ent, pmenuhnd_t *p);
+void CTFJoinTeam3(edict_t* ent, pmenuhnd_t* p);
+void CTFJoinTeam4(edict_t* ent, pmenuhnd_t* p);
 void CTFReturnToMain(edict_t *ent, pmenuhnd_t *p);
 void CTFChaseCam(edict_t *ent, pmenuhnd_t *p);
 
@@ -2722,8 +2768,9 @@ static const int jmenu_level = 1;
 static const int jmenu_match = 2;
 static const int jmenu_red = 4;
 static const int jmenu_blue = 7;
-static const int jmenu_chase = 10;
-static const int jmenu_reqmatch = 12;
+static const int jmenu_green = 10; // New
+static const int jmenu_yellow = 13; // New
+static const int jmenu_chase = 16; // Shifted down
 
 const pmenu_t joinmenu[] = {
 	{ "*$g_pc_3wctf", PMENU_ALIGN_CENTER, nullptr },
@@ -2731,11 +2778,19 @@ const pmenu_t joinmenu[] = {
 	{ "", PMENU_ALIGN_CENTER, nullptr },
 	{ "", PMENU_ALIGN_CENTER, nullptr },
 	{ "$g_pc_join_red_team", PMENU_ALIGN_LEFT, CTFJoinTeam1 },
-	{ "", PMENU_ALIGN_LEFT, nullptr },
+	{ "", PMENU_ALIGN_LEFT, nullptr }, // Count
 	{ "", PMENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_join_blue_team", PMENU_ALIGN_LEFT, CTFJoinTeam2 },
+	{ "", PMENU_ALIGN_LEFT, nullptr }, // Count
 	{ "", PMENU_ALIGN_LEFT, nullptr },
+	// NEW TEAMS
+	{ "Join Green Team", PMENU_ALIGN_LEFT, CTFJoinTeam3 },
+	{ "", PMENU_ALIGN_LEFT, nullptr }, // Count
 	{ "", PMENU_ALIGN_LEFT, nullptr },
+	{ "Join Yellow Team", PMENU_ALIGN_LEFT, CTFJoinTeam4 },
+	{ "", PMENU_ALIGN_LEFT, nullptr }, // Count
+	{ "", PMENU_ALIGN_LEFT, nullptr },
+	//
 	{ "$g_pc_chase_camera", PMENU_ALIGN_LEFT, CTFChaseCam },
 	{ "", PMENU_ALIGN_LEFT, nullptr },
 	{ "", PMENU_ALIGN_LEFT, nullptr },
@@ -2794,6 +2849,16 @@ void CTFJoinTeam1(edict_t *ent, pmenuhnd_t *p)
 void CTFJoinTeam2(edict_t *ent, pmenuhnd_t *p)
 {
 	CTFJoinTeam(ent, CTF_TEAM2);
+}
+
+void CTFJoinTeam3(edict_t* ent, pmenuhnd_t* p)
+{
+	CTFJoinTeam(ent, CTF_TEAM3);
+}
+
+void CTFJoinTeam4(edict_t* ent, pmenuhnd_t* p)
+{
+	CTFJoinTeam(ent, CTF_TEAM4);
 }
 
 static void CTFNoChaseCamUpdate(edict_t *ent)
@@ -2867,21 +2932,62 @@ void CTFShowScores(edict_t *ent, pmenu_t *p)
 	DeathmatchScoreboard(ent);
 }
 
-void CTFUpdateJoinMenu(edict_t *ent)
+void CTFUpdateJoinMenu(edict_t* ent)
 {
-	pmenu_t		*entries = ent->client->menu->entries;
+	pmenu_t* entries = ent->client->menu->entries;
 
 	SetGameName(entries);
 
+	// ------------------------------------------------------------------------
+	// 1. COUNT PLAYERS (Moved up to determine unlock status)
+	// ------------------------------------------------------------------------
+	uint32_t num1 = 0, num2 = 0, num3 = 0, num4 = 0;
+	for (uint32_t i = 0; i < game.maxclients; i++)
+	{
+		if (!g_edicts[i + 1].inuse)
+			continue;
+		if (game.clients[i].resp.ctf_team == CTF_TEAM1) num1++;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM2) num2++;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM3) num3++;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM4) num4++;
+	}
+
+	// ------------------------------------------------------------------------
+	// 2. DETERMINE UNLOCK STATUS
+	// ------------------------------------------------------------------------
+	// Green requires 5 Red AND 5 Blue
+	bool green_unlocked = (num1 >= 5 && num2 >= 5);
+
+	// Yellow requires Green Unlocked AND 5 Green
+	bool yellow_unlocked = (green_unlocked && num3 >= 5);
+
+	// Admin/Match Override: If a match is starting or active, unlock everything
+	if (ctfgame.match >= MATCH_PREGAME) {
+		green_unlocked = true;
+		yellow_unlocked = true;
+	}
+
+	// ------------------------------------------------------------------------
+	// 3. SETUP TEAM ENTRIES (LOCKING & TEXT)
+	// ------------------------------------------------------------------------
 	if (ctfgame.match >= MATCH_PREGAME && matchlock->integer)
 	{
+		// Match Locked: Disable all join entries
 		Q_strlcpy(entries[jmenu_red].text, "MATCH IS LOCKED", sizeof(entries[jmenu_red].text));
 		entries[jmenu_red].SelectFunc = nullptr;
+
 		Q_strlcpy(entries[jmenu_blue].text, "  (entry is not permitted)", sizeof(entries[jmenu_blue].text));
 		entries[jmenu_blue].SelectFunc = nullptr;
+
+		Q_strlcpy(entries[jmenu_green].text, "  (entry is not permitted)", sizeof(entries[jmenu_green].text));
+		entries[jmenu_green].SelectFunc = nullptr;
+
+		Q_strlcpy(entries[jmenu_yellow].text, "  (entry is not permitted)", sizeof(entries[jmenu_yellow].text));
+		entries[jmenu_yellow].SelectFunc = nullptr;
 	}
 	else
 	{
+		// --- RED & BLUE (Always Open) ---
 		if (ctfgame.match >= MATCH_PREGAME)
 		{
 			Q_strlcpy(entries[jmenu_red].text, "Join Red MATCH Team", sizeof(entries[jmenu_red].text));
@@ -2894,23 +3000,80 @@ void CTFUpdateJoinMenu(edict_t *ent)
 		}
 		entries[jmenu_red].SelectFunc = CTFJoinTeam1;
 		entries[jmenu_blue].SelectFunc = CTFJoinTeam2;
+
+		// --- GREEN (Conditional) ---
+		if (green_unlocked)
+		{
+			if (ctfgame.match >= MATCH_PREGAME)
+				Q_strlcpy(entries[jmenu_green].text, "Join Green MATCH Team", sizeof(entries[jmenu_green].text));
+			else
+				Q_strlcpy(entries[jmenu_green].text, "Join Green Team", sizeof(entries[jmenu_green].text));
+
+			entries[jmenu_green].SelectFunc = CTFJoinTeam3;
+		}
+		else
+		{
+			Q_strlcpy(entries[jmenu_green].text, "Join Green (Locked: Need 5 R/B)", sizeof(entries[jmenu_green].text));
+			entries[jmenu_green].SelectFunc = nullptr;
+		}
+
+		// --- YELLOW (Conditional) ---
+		if (yellow_unlocked)
+		{
+			if (ctfgame.match >= MATCH_PREGAME)
+				Q_strlcpy(entries[jmenu_yellow].text, "Join Yellow MATCH Team", sizeof(entries[jmenu_yellow].text));
+			else
+				Q_strlcpy(entries[jmenu_yellow].text, "Join Yellow Team", sizeof(entries[jmenu_yellow].text));
+
+			entries[jmenu_yellow].SelectFunc = CTFJoinTeam4;
+		}
+		else
+		{
+			Q_strlcpy(entries[jmenu_yellow].text, "Join Yellow (Locked: Need 5 G)", sizeof(entries[jmenu_yellow].text));
+			entries[jmenu_yellow].SelectFunc = nullptr;
+		}
 	}
 
-	// KEX_FIXME: what's this for?
+	// ------------------------------------------------------------------------
+	// 4. FORCE JOIN LOGIC
+	// ------------------------------------------------------------------------
 	if (g_teamplay_force_join->string && *g_teamplay_force_join->string)
 	{
+		// Helper lambda to clear an entry
+		auto ClearEntry = [&](int index) {
+			entries[index].text[0] = '\0';
+			entries[index].SelectFunc = nullptr;
+			};
+
 		if (Q_strcasecmp(g_teamplay_force_join->string, "red") == 0)
 		{
-			entries[jmenu_blue].text[0] = '\0';
-			entries[jmenu_blue].SelectFunc = nullptr;
+			ClearEntry(jmenu_blue);
+			ClearEntry(jmenu_green);
+			ClearEntry(jmenu_yellow);
 		}
 		else if (Q_strcasecmp(g_teamplay_force_join->string, "blue") == 0)
 		{
-			entries[jmenu_red].text[0] = '\0';
-			entries[jmenu_red].SelectFunc = nullptr;
+			ClearEntry(jmenu_red);
+			ClearEntry(jmenu_green);
+			ClearEntry(jmenu_yellow);
+		}
+		else if (Q_strcasecmp(g_teamplay_force_join->string, "green") == 0)
+		{
+			ClearEntry(jmenu_red);
+			ClearEntry(jmenu_blue);
+			ClearEntry(jmenu_yellow);
+		}
+		else if (Q_strcasecmp(g_teamplay_force_join->string, "yellow") == 0)
+		{
+			ClearEntry(jmenu_red);
+			ClearEntry(jmenu_blue);
+			ClearEntry(jmenu_green);
 		}
 	}
 
+	// ------------------------------------------------------------------------
+	// 5. CHASE CAMERA & LEVEL INFO
+	// ------------------------------------------------------------------------
 	if (ent->client->chase_target)
 		Q_strlcpy(entries[jmenu_chase].text, "$g_pc_leave_chase_camera", sizeof(entries[jmenu_chase].text));
 	else
@@ -2918,59 +3081,52 @@ void CTFUpdateJoinMenu(edict_t *ent)
 
 	SetLevelName(entries + jmenu_level);
 
-	uint32_t num1 = 0, num2 = 0;
-	for (uint32_t i = 0; i < game.maxclients; i++)
-	{
-		if (!g_edicts[i + 1].inuse)
-			continue;
-		if (game.clients[i].resp.ctf_team == CTF_TEAM1)
-			num1++;
-		else if (game.clients[i].resp.ctf_team == CTF_TEAM2)
-			num2++;
-	}
-
+	// ------------------------------------------------------------------------
+	// 6. MATCH STATUS
+	// ------------------------------------------------------------------------
 	switch (ctfgame.match)
 	{
 	case MATCH_NONE:
 		entries[jmenu_match].text[0] = '\0';
 		break;
-
 	case MATCH_SETUP:
 		Q_strlcpy(entries[jmenu_match].text, "*MATCH SETUP IN PROGRESS", sizeof(entries[jmenu_match].text));
 		break;
-
 	case MATCH_PREGAME:
 		Q_strlcpy(entries[jmenu_match].text, "*MATCH STARTING", sizeof(entries[jmenu_match].text));
 		break;
-
 	case MATCH_GAME:
 		Q_strlcpy(entries[jmenu_match].text, "*MATCH IN PROGRESS", sizeof(entries[jmenu_match].text));
 		break;
-
 	default:
 		break;
 	}
 
-	if (*entries[jmenu_red].text)
-	{
-		Q_strlcpy(entries[jmenu_red + 1].text, "$g_pc_playercount", sizeof(entries[jmenu_red + 1].text));
-		G_FmtTo(entries[jmenu_red + 1].text_arg1, "{}", num1);
-	}
-	else
-	{
-		entries[jmenu_red + 1].text[0] = '\0';
-		entries[jmenu_red + 1].text_arg1[0] = '\0';
-	}
-	if (*entries[jmenu_blue].text)
-	{
-		Q_strlcpy(entries[jmenu_blue + 1].text, "$g_pc_playercount", sizeof(entries[jmenu_blue + 1].text));
-		G_FmtTo(entries[jmenu_blue + 1].text_arg1, "{}", num2);
-	}
-	else
-	{
-		entries[jmenu_blue + 1].text[0] = '\0';
-		entries[jmenu_blue + 1].text_arg1[0] = '\0';
-	}
+	// ------------------------------------------------------------------------
+	// 7. UPDATE PLAYER COUNTS IN MENU
+	// ------------------------------------------------------------------------
+	auto SetPlayerCount = [&](int menu_idx, uint32_t count) {
+		if (*entries[menu_idx].text) // Only show count if the team entry is visible
+		{
+			Q_strlcpy(entries[menu_idx + 1].text, "$g_pc_playercount", sizeof(entries[menu_idx + 1].text));
+			G_FmtTo(entries[menu_idx + 1].text_arg1, "{}", count);
+		}
+		else
+		{
+			entries[menu_idx + 1].text[0] = '\0';
+			entries[menu_idx + 1].text_arg1[0] = '\0';
+		}
+		};
+
+	SetPlayerCount(jmenu_red, num1);
+	SetPlayerCount(jmenu_blue, num2);
+	SetPlayerCount(jmenu_green, num3);
+	SetPlayerCount(jmenu_yellow, num4);
+
+	// ------------------------------------------------------------------------
+	// 8. REQUEST MATCH OPTION
+	// ------------------------------------------------------------------------
+	static const int jmenu_reqmatch = 18;
 
 	entries[jmenu_reqmatch].text[0] = '\0';
 	entries[jmenu_reqmatch].SelectFunc = nullptr;
@@ -2981,26 +3137,69 @@ void CTFUpdateJoinMenu(edict_t *ent)
 	}
 }
 
-void CTFOpenJoinMenu(edict_t *ent)
+void CTFOpenJoinMenu(edict_t* ent)
 {
-	uint32_t num1 = 0, num2 = 0;
+	uint32_t num1 = 0, num2 = 0, num3 = 0, num4 = 0;
+
+	// 1. Count players on all teams
 	for (uint32_t i = 0; i < game.maxclients; i++)
 	{
 		if (!g_edicts[i + 1].inuse)
 			continue;
-		if (game.clients[i].resp.ctf_team == CTF_TEAM1)
-			num1++;
-		else if (game.clients[i].resp.ctf_team == CTF_TEAM2)
-			num2++;
+		if (game.clients[i].resp.ctf_team == CTF_TEAM1) num1++;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM2) num2++;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM3) num3++;
+		else if (game.clients[i].resp.ctf_team == CTF_TEAM4) num4++;
 	}
 
-	int team;
+	// 2. Determine Validity (Unlock Status)
+	// Green requires 5 Red AND 5 Blue
+	bool green_valid = (num1 >= 5 && num2 >= 5);
 
-	if (num1 > num2)
-		team = CTF_TEAM1;
-	else if (num2 > num1)
+	// Yellow requires Green Unlocked AND 5 Green
+	bool yellow_valid = (green_valid && num3 >= 5);
+
+	// Override: If a match is starting/active, all teams are valid targets
+	if (ctfgame.match >= MATCH_PREGAME) {
+		green_valid = true;
+		yellow_valid = true;
+	}
+
+	// 3. Auto-balance cursor position
+	// Start by assuming Red is the target
+	int team = CTF_TEAM1;
+	uint32_t min_players = num1;
+
+	// Check Blue (Always valid)
+	if (num2 < min_players) {
+		min_players = num2;
 		team = CTF_TEAM2;
-	team = brandom() ? CTF_TEAM1 : CTF_TEAM2;
+	}
+	else if (num2 == min_players) {
+		if (brandom()) team = CTF_TEAM2;
+	}
+
+	// Check Green (Only if unlocked)
+	if (green_valid) {
+		if (num3 < min_players) {
+			min_players = num3;
+			team = CTF_TEAM3;
+		}
+		else if (num3 == min_players) {
+			if (brandom()) team = CTF_TEAM3;
+		}
+	}
+
+	// Check Yellow (Only if unlocked)
+	if (yellow_valid) {
+		if (num4 < min_players) {
+			min_players = num4;
+			team = CTF_TEAM4;
+		}
+		else if (num4 == min_players) {
+			if (brandom()) team = CTF_TEAM4;
+		}
+	}
 
 	PMenu_Open(ent, joinmenu, team, sizeof(joinmenu) / sizeof(pmenu_t), nullptr, CTFUpdateJoinMenu);
 }

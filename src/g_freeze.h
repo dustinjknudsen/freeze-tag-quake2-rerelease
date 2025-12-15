@@ -14,7 +14,7 @@ struct {
 	int	frozen;
 	int	alive;
 	gtime_t	break_time;
-} freeze[2];
+} freeze[4];
 
 // Team Names Array 
 static const char* freeze_team[] = { "Red", "Blue", "Green", "Yellow", "None" };
@@ -34,17 +34,18 @@ enum hook_rescue_state_t {
 	RESCUE_STOPPING,    // Coming to a stop
 	RESCUE_AIMING,      // Stopped, lining up shot
 	RESCUE_FIRING,      // Firing hook
-	RESCUE_REELING      // Hook attached, pulling
+	RESCUE_REELING,      // Hook attached, pulling
+	RESCUE_RETREATING
 };
 
 // Item hook states
-enum item_hook_state_t {
-	ITEM_HOOK_NONE,
-	ITEM_HOOK_STOPPING,
-	ITEM_HOOK_AIMING,
-	ITEM_HOOK_FIRING,
-	ITEM_HOOK_SWINGING
-};
+//enum item_hook_state_t {
+//	ITEM_HOOK_NONE,
+//	ITEM_HOOK_STOPPING,
+//	ITEM_HOOK_AIMING,
+//	ITEM_HOOK_FIRING,
+//	ITEM_HOOK_SWINGING
+//};
 
 //================================================================================================
 // SECTION 3: PLAYER PHYSICS AND DAMAGE HOOKS

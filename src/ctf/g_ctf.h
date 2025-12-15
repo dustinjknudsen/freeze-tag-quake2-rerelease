@@ -10,7 +10,9 @@ enum ctfteam_t
 {
 	CTF_NOTEAM,
 	CTF_TEAM1,
-	CTF_TEAM2
+	CTF_TEAM2,
+	CTF_TEAM3,
+	CTF_TEAM4
 };
 
 enum ctfgrapplestate_t
@@ -44,6 +46,8 @@ extern cvar_t *teamplay;
 
 constexpr const char *CTF_TEAM1_SKIN = "ctf_r";
 constexpr const char *CTF_TEAM2_SKIN = "ctf_b";
+constexpr const char* CTF_TEAM3_SKIN = "ctf_g";
+constexpr const char* CTF_TEAM4_SKIN = "ctf_y";
 
 constexpr int32_t CTF_CAPTURE_BONUS = 15;	  // what you get for capture
 constexpr int32_t CTF_TEAM_BONUS = 10;		  // what your team gets for capture

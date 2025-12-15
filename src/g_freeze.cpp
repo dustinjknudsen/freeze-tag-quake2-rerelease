@@ -19,20 +19,20 @@ float VectorNormalize2(const vec3_t& v, vec3_t& out) {
 	return length;
 }
 
-// I just wish they'd made CTF_TEAM1 0
 ctfteam_t get_team_enum(int i) {
-	if (i == 0)
-		return CTF_TEAM1;
-	if (i == 1)
-		return CTF_TEAM2;
-	return CTF_TEAM2;
+	if (i == 0) return CTF_TEAM1; // Red
+	if (i == 1) return CTF_TEAM2; // Blue
+	if (i == 2) return CTF_TEAM3; // Green
+	if (i == 3) return CTF_TEAM4; // Yellow
+	return CTF_TEAM1;
 }
+
 uint32_t get_team_int(ctfteam_t t) {
-	if (t == CTF_TEAM1)
-		return 0;
-	if (t == CTF_TEAM2)
-		return 1;
-	return 1;
+	if (t == CTF_TEAM1) return 0; // Red
+	if (t == CTF_TEAM2) return 1; // Blue
+	if (t == CTF_TEAM3) return 2; // Green
+	if (t == CTF_TEAM4) return 3; // Yellow
+	return 0;
 }
 
 #define	hook_on	0x00000001
@@ -400,8 +400,7 @@ void freezeBotHook()
 			// Wait for hook to connect or timeout
 			if (bot->client->hookstate & hook_in)
 			{
-				// Check if we actually hooked our frozen ally (not a wall)
-				// The hook entity's enemy field contains what it hooked
+				// Check if we actually hooked our frozen ally
 				bool hooked_ally = false;
 				for (int j = 0; j < globals.num_edicts; j++)
 				{
@@ -415,20 +414,32 @@ void freezeBotHook()
 
 				if (hooked_ally)
 				{
-					bot->client->hook_rescue_state = RESCUE_REELING;
-					//bot->client->hook_rescue_time = level.time + 5_sec; // 5 second auto-detach timer
+					// --- MODIFIED LOGIC START ---
+					// 50% chance to Drag (Retreat), 50% chance to just Reel
+					if (rand() % 2 == 0)
+					{
+						bot->client->hook_rescue_state = RESCUE_RETREATING;
+						// Give them slightly longer to drag the body to safety
+						bot->client->hook_rescue_time = level.time + 4_sec;
+					}
+					else
+					{
+						bot->client->hook_rescue_state = RESCUE_REELING;
+						// Standard reel time
+						//bot->client->hook_rescue_time = level.time + 5_sec; 
+					}
+					// --- MODIFIED LOGIC END ---
 				}
 				else
 				{
-					// Hooked a wall or something else - detach immediately
+					// Hooked a wall - detach
 					bot->client->hookstate = 0;
 					bot->client->hook_rescue_state = RESCUE_NONE;
-					bot->client->hook_rescue_time = level.time + 2_sec; // Cooldown before retry
+					bot->client->hook_rescue_time = level.time + 2_sec;
 				}
 			}
 			else if (!(bot->client->hookstate & hook_on) || level.time > bot->client->hook_rescue_time)
 			{
-				// Hook failed or timed out - cooldown before retry
 				bot->client->hook_rescue_state = RESCUE_NONE;
 				bot->client->hook_rescue_time = level.time + 3_sec;
 			}
@@ -470,6 +481,70 @@ void freezeBotHook()
 			}
 			break;
 		}
+
+		case RESCUE_RETREATING:
+		{
+			// Keep model upright while retreating
+			bot->s.angles[PITCH] = 0;
+
+			// Hook attached - pull frozen ally while backing up
+			if (!(bot->client->hookstate & hook_on))
+			{
+				// Hook dropped - cooldown before retry
+				bot->client->hook_rescue_state = RESCUE_NONE;
+				bot->client->hook_rescue_time = level.time + 2_sec;
+				break;
+			}
+
+			// Auto-detach hook after timeout
+			if (level.time > bot->client->hook_rescue_time)
+			{
+				bot->client->hookstate = 0;
+				bot->client->hook_rescue_state = RESCUE_NONE;
+				bot->client->hook_rescue_time = level.time + 2_sec;
+				break;
+			}
+
+			// Reel in the frozen ally
+			bot->client->hookstate |= shrink_on;
+			bot->client->hookstate &= ~grow_on;
+
+			// Make bot crouch
+			bot->client->ps.pmove.pm_flags |= PMF_DUCKED;
+			bot->mins[2] = -24;
+			bot->maxs[2] = 4;
+			bot->viewheight = -2;
+
+			// Calculate retreat direction (away from frozen ally)
+			vec3_t retreat_dir;
+			VectorSubtract(bot->s.origin, frozen_ally->s.origin, retreat_dir);
+			retreat_dir[2] = 0; // Keep horizontal
+			VectorNormalize(retreat_dir);
+
+			// Find a point to retreat to (200 units behind bot)
+			vec3_t retreat_target;
+			VectorMA(bot->s.origin, 200, retreat_dir, retreat_target);
+
+			// Move the bot backward
+			gi.Bot_MoveToPoint(bot, retreat_target, 0);
+
+			// Check if frozen ally is close enough to thaw
+			float current_dist = (bot->s.origin - frozen_ally->s.origin).length();
+			if (current_dist <= MELEE_DISTANCE + 32)
+			{
+				// Stand back up when done
+				bot->client->ps.pmove.pm_flags &= ~PMF_DUCKED;
+				bot->mins[2] = -24;
+				bot->maxs[2] = 32;
+				bot->viewheight = 22;
+
+				bot->client->hookstate = 0;
+				bot->client->hook_rescue_state = RESCUE_NONE;
+				bot->client->hook_rescue_time = level.time + 1_sec;
+			}
+			break;
+		}
+
 		}
 	}
 }
@@ -995,11 +1070,13 @@ void freezeIntermission(void)
 	int	team;
 
 	i = j = k = 0;
-	for (i = 0; i < 2; i++)
+	// Check scores (Loop 4 times)
+	for (i = 0; i < 4; i++)
 		if (get_team_score(i) > j)
 			j = get_team_score(i);
 
-	for (i = 0; i < 2; i++)
+	// Find winners (Loop 4 times)
+	for (i = 0; i < 4; i++)
 		if (get_team_score(i) == j)
 		{
 			k++;
@@ -1009,11 +1086,12 @@ void freezeIntermission(void)
 	if (k > 1)
 	{
 		i = j = k = 0;
-		for (i = 0; i < 2; i++)
+		// Tie breaker on thaws (Loop 4 times)
+		for (i = 0; i < 4; i++)
 			if (freeze[i].thawed > j)
 				j = freeze[i].thawed;
 
-		for (i = 0; i < 2; i++)
+		for (i = 0; i < 4; i++)
 			if (freeze[i].thawed == j)
 			{
 				k++;
@@ -1098,7 +1176,8 @@ void updateTeam(int team)
 
 	if (frozen && !alive)
 	{
-		for (int i = 0; i < 2; i++)
+		// Loop 4 times to award points to all surviving teams
+		for (int i = 0; i < 4; i++)
 		{
 			if (freeze[i].alive)
 			{
@@ -1118,7 +1197,8 @@ bool endCheck()
 {
 	int	i;
 
-	for (i = 0; i < 2; i++)
+	// Loop 4 times
+	for (i = 0; i < 4; i++)
 		if (/*freeze[i].update && */level.time > freeze[i].last_update)
 		{
 			updateTeam(i);
@@ -1128,7 +1208,8 @@ bool endCheck()
 
 	if (capturelimit->value)
 	{
-		for (i = 0; i < 2; i++)
+		// Loop 4 times
+		for (i = 0; i < 4; i++)
 			if (get_team_score(i) >= capturelimit->value)
 				return true;
 	}
@@ -1175,8 +1256,12 @@ void playerShell(edict_t* ent, ctfteam_t team)
 	ent->s.effects |= EF_COLOR_SHELL;
 	if (team == CTF_TEAM1)
 		ent->s.renderfx |= RF_SHELL_RED;
-	else
+	else if (team == CTF_TEAM2)
 		ent->s.renderfx |= RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE;
+	else if (team == CTF_TEAM3)
+		ent->s.renderfx |= RF_SHELL_GREEN;
+	else
+		ent->s.renderfx |= RF_SHELL_RED | RF_SHELL_GREEN;
 }
 
 void freezeEffects(edict_t* ent)
@@ -1219,13 +1304,26 @@ void FreezeScoreboardMessage(edict_t* ent, edict_t* killer)
 			team_id = 1;
 		else if (client->resp.ctf_team == CTF_TEAM2)
 			team_id = 2;
+		else if (client->resp.ctf_team == CTF_TEAM3) // Green
+			team_id = 3;
+		else if (client->resp.ctf_team == CTF_TEAM4) // Yellow
+			team_id = 4;
+
+		// --- CALCULATION LOGIC ---
+		// Total Score is already (Frags + Thaws) because playerUnfreeze adds to score.
+		int total_score = client->resp.score;
+		int thaws = client->resp.thawed;
+
+		// Derive 'pure' frags by removing thaw points from the total
+		int frags = total_score - thaws;
+		// -------------------------
 
 		all_players.push_back({
 			(int)i,
 			team_id,
-			client->resp.score,
-			0,  // thaws - replace with client->resp.thaws if you add it
-			client->resp.score,
+			frags,        // Pass calculated frags, not total score
+			thaws,        // Pass actual thaw count
+			total_score,  // Pass total score (SCR)
 			client->ping,
 			client->frozen ? true : false,
 			client->resp.spectator ? true : false
@@ -1642,7 +1740,7 @@ void freezeSpawn()
 	int	i;
 
 	memset(freeze, 0, sizeof(freeze));
-	for (i = 0; i < 2; i++) {
+	for (i = 0; i < 4; i++) {
 		freeze[i].update = true;
 		freeze[i].last_update = level.time;
 	}
