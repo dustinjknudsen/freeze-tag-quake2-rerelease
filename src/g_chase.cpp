@@ -5,134 +5,196 @@
 
 void UpdateChaseCam(edict_t* ent)
 {
-	vec3_t       o, ownerv, goal;
-	edict_t* targ;
-	vec3_t       forward, right;
-	trace_t      trace;
-	vec3_t       oldgoal;
-	vec3_t       angles;
+    vec3_t       o, ownerv, goal;
+    edict_t* targ;
+    vec3_t       forward, right;
+    trace_t      trace;
+    vec3_t       angles;
 
-	// is our chase target gone?
-	if (!ent->client->chase_target->inuse || ent->client->chase_target->client->resp.spectator ||
-		(ent->client->frozen && (ent->client->frozen_time < level.time + 2_sec || ent->client->thaw_time < level.time + 1_sec)) ||
-		(ent->health < 0 && !ent->client->frozen))
-	{
-		ent->client->chase_target = nullptr;
-		ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
+    // Check for third-person self-chase
+    bool selfChase = (ent->client->thirdperson && ent->client->chase_target == ent);
 
-		// Remove ghost when exiting chase mode
-		if (ent->client->frozen)
-			RemoveFrozenBodyGhost(ent);
+    if (selfChase)
+    {
+        // Exit third-person if dead (and not frozen)
+        if (ent->health <= 0 && !ent->client->frozen)
+        {
+            ent->client->thirdperson = false;
+            ent->client->chase_target = nullptr;
+            ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
+            return;
+        }
+        targ = ent;
+    }
+    else
+    {
+        // Original chase target validation for spectating others
+        if (!ent->client->chase_target->inuse || ent->client->chase_target->client->resp.spectator ||
+            (ent->client->frozen && (ent->client->frozen_time < level.time + 2_sec || ent->client->thaw_time < level.time + 1_sec)) ||
+            (ent->health < 0 && !ent->client->frozen))
+        {
+            ent->client->chase_target = nullptr;
+            ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
 
-		return;
-	}
+            if (ent->client->frozen)
+                RemoveFrozenBodyGhost(ent);
 
-	targ = ent->client->chase_target;
+            return;
+        }
+        targ = ent->client->chase_target;
+    }
 
-	ownerv = targ->s.origin;
-	oldgoal = ent->s.origin;
+    ownerv = targ->s.origin;
 
-	// On first chase frame, use target's origin as starting point
-	if (oldgoal == vec3_origin || ent->client->update_chase)
-		oldgoal = targ->s.origin;
+    // On first chase frame, use target's origin as starting point
+    // (skip this check for self-chase since we're always at our own origin)
+    if (!selfChase)
+    {
+        vec3_t oldgoal = ent->s.origin;
+        if (oldgoal == vec3_origin || ent->client->update_chase)
+            oldgoal = targ->s.origin;
+    }
 
-	ownerv[2] += targ->viewheight;
+    ownerv[2] += targ->viewheight;
 
-	angles = targ->client->v_angle;
-	if (angles[PITCH] > 56)
-		angles[PITCH] = 56;
+    angles = targ->client->v_angle;
+    if (angles[PITCH] > 56)
+        angles[PITCH] = 56;
 
-	AngleVectors(angles, forward, right, nullptr);
-	forward.normalize();
-	o = ownerv + (forward * -30);
+    AngleVectors(angles, forward, right, nullptr);
+    forward.normalize();
+    o = ownerv + (forward * -30);
 
-	if (o[2] < targ->s.origin[2] + 20)
-		o[2] = targ->s.origin[2] + 20;
+    if (o[2] < targ->s.origin[2] + 20)
+        o[2] = targ->s.origin[2] + 20;
 
-	// jump animation lifts
-	if (!targ->groundentity)
-		o[2] += 16;
+    // jump animation lifts
+    if (!targ->groundentity)
+        o[2] += 16;
 
-	// Trace from target's viewpoint to desired camera position
-	trace = gi.traceline(ownerv, o, targ, MASK_SOLID);
+    // Trace from target's viewpoint to desired camera position
+    trace = gi.traceline(ownerv, o, targ, MASK_SOLID);
 
-	goal = trace.endpos;
-	goal += (forward * 2); // Back off slightly
+    goal = trace.endpos;
+    goal += (forward * 2); // Back off slightly
 
-	// pad for floors and ceilings
-	// Check ceiling clip
-	o = goal;
-	o[2] += 6;
-	trace = gi.traceline(goal, o, targ, MASK_SOLID);
-	if (trace.fraction < 1)
-	{
-		goal = trace.endpos;
-		goal[2] -= 6;
-	}
+    // pad for floors and ceilings
+    o = goal;
+    o[2] += 6;
+    trace = gi.traceline(goal, o, targ, MASK_SOLID);
+    if (trace.fraction < 1)
+    {
+        goal = trace.endpos;
+        goal[2] -= 6;
+    }
 
-	// Check floor clip
-	o = goal;
-	o[2] -= 6;
-	trace = gi.traceline(goal, o, targ, MASK_SOLID);
-	if (trace.fraction < 1)
-	{
-		goal = trace.endpos;
-		goal[2] += 6;
-	}
+    o = goal;
+    o[2] -= 6;
+    trace = gi.traceline(goal, o, targ, MASK_SOLID);
+    if (trace.fraction < 1)
+    {
+        goal = trace.endpos;
+        goal[2] += 6;
+    }
 
-	if (ent->client->frozen) {
-		// Create ghost if it doesn't exist
-		CreateFrozenBodyGhost(ent);
+    // === THIRD-PERSON SELF-CHASE MODE ===
+    if (selfChase)
+    {
+        // Custom camera positioning for third-person
+        vec3_t cam_offset;
 
-		// Update ghost visual state
-		UpdateFrozenBodyGhost(ent);
+        angles = targ->client->v_angle;
+        if (angles[PITCH] > 56)
+            angles[PITCH] = 56;
 
-		// Hide the real player entity from this client's view
-		ent->svflags |= SVF_NOCLIENT;
+        AngleVectors(angles, forward, right, nullptr);
 
-		// Move camera to chase position
-		ent->client->ps.pmove.origin = goal;
-		ent->client->ps.pmove.pm_type = PM_SPECTATOR;
-		ent->client->ps.viewoffset = {};
-	}
-	else {
-		if (targ->deadflag)
-			ent->client->ps.pmove.pm_type = PM_DEAD;
-		else
-			ent->client->ps.pmove.pm_type = PM_FREEZE;
+        // Start at player origin + eye height
+        ownerv = targ->s.origin;
+        ownerv[2] += targ->viewheight - 8;  // Slightly lower than eye level
 
-		ent->s.origin = goal;
-		ent->client->ps.pmove.origin = goal;
-		ent->client->ps.viewoffset = {};
-	}
+        // Position camera behind player
+        o = ownerv + (forward * -50);  // 50 units behind (adjust to taste)
 
-	ent->client->ps.pmove.delta_angles = targ->client->v_angle - ent->client->resp.cmd_angles;
+        // Minimum height
+        if (o[2] < targ->s.origin[2] + 10)
+            o[2] = targ->s.origin[2] + 10;
 
-	if (targ->deadflag)
-	{
-		ent->client->ps.viewangles[ROLL] = 40;
-		ent->client->ps.viewangles[PITCH] = -15;
-		ent->client->ps.viewangles[YAW] = targ->client->killer_yaw;
-	}
-	else
-	{
-		ent->client->ps.viewangles = targ->client->v_angle;
-		ent->client->ps.viewangles[ROLL] = 0;  // Keep camera level
+        // Trace to avoid going through walls
+        trace = gi.traceline(ownerv, o, targ, MASK_SOLID);
+        goal = trace.endpos;
+        goal += (forward * 2);
 
-		// Keep camera pitch level when following a bot doing hook rescue
-		if ((targ->svflags & SVF_BOT) && targ->client->hook_rescue_state >= RESCUE_AIMING)
-			ent->client->ps.viewangles[PITCH] = 0;
+        // Create ghost if it doesn't exist
+        CreateThirdPersonGhost(ent);
 
-		ent->client->v_angle = ent->client->ps.viewangles;
-		AngleVectors(ent->client->v_angle, ent->client->v_forward, nullptr, nullptr);
-	}
+        // Update ghost visual state
+        UpdateThirdPersonGhost(ent);
 
-	ent->viewheight = 0;
+        // Calculate view offset from player origin to camera position
+        ent->client->ps.viewoffset[0] = goal[0] - ent->s.origin[0];
+        ent->client->ps.viewoffset[1] = goal[1] - ent->s.origin[1];
+        ent->client->ps.viewoffset[2] = goal[2] - ent->s.origin[2];
 
-	// Always disable prediction to prevent jitter
-	ent->client->ps.pmove.pm_flags |= PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION;
+        // Disable prediction to prevent jitter
+        ent->client->ps.pmove.pm_flags |= PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION;
 
-	gi.linkentity(ent);
+        gi.linkentity(ent);
+        return;
+    }
+    // === END THIRD-PERSON MODE ===
+
+    if (ent->client->frozen) {
+        // Create ghost if it doesn't exist
+        CreateFrozenBodyGhost(ent);
+
+        // Update ghost visual state
+        UpdateFrozenBodyGhost(ent);
+
+        // Hide the real player entity from this client's view
+        ent->svflags |= SVF_NOCLIENT;
+
+        // Move camera to chase position
+        ent->client->ps.pmove.origin = goal;
+        ent->client->ps.pmove.pm_type = PM_SPECTATOR;
+        ent->client->ps.viewoffset = {};
+    }
+    else {
+        if (targ->deadflag)
+            ent->client->ps.pmove.pm_type = PM_DEAD;
+        else
+            ent->client->ps.pmove.pm_type = PM_FREEZE;
+
+        ent->s.origin = goal;
+        ent->client->ps.pmove.origin = goal;
+        ent->client->ps.viewoffset = {};
+    }
+
+    ent->client->ps.pmove.delta_angles = targ->client->v_angle - ent->client->resp.cmd_angles;
+
+    if (targ->deadflag)
+    {
+        ent->client->ps.viewangles[ROLL] = 40;
+        ent->client->ps.viewangles[PITCH] = -15;
+        ent->client->ps.viewangles[YAW] = targ->client->killer_yaw;
+    }
+    else
+    {
+        ent->client->ps.viewangles = targ->client->v_angle;
+        ent->client->ps.viewangles[ROLL] = 0;
+
+        if ((targ->svflags & SVF_BOT) && targ->client->hook_rescue_state >= RESCUE_AIMING)
+            ent->client->ps.viewangles[PITCH] = 0;
+
+        ent->client->v_angle = ent->client->ps.viewangles;
+        AngleVectors(ent->client->v_angle, ent->client->v_forward, nullptr, nullptr);
+    }
+
+    ent->viewheight = 0;
+
+    ent->client->ps.pmove.pm_flags |= PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION;
+
+    gi.linkentity(ent);
 }
 
 void ChaseNext(edict_t *ent)

@@ -3019,6 +3019,7 @@ struct gclient_t
 	gtime_t	thaw_time;
 	gtime_t	frozen_time;
 	edict_t* frozen_body;
+	edict_t* thirdperson_body;
 	int	hookstate;
 	int         item_hook_state;
 	gtime_t     item_hook_time;
@@ -3028,6 +3029,7 @@ struct gclient_t
 	gtime_t	moan_time;
 	int	hook_rescue_state;
 	gtime_t hook_rescue_time;
+	bool thirdperson;
 	/* freeze */
 };
 

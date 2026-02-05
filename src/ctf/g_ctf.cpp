@@ -101,6 +101,8 @@ cvar_t *warn_unbalanced;
 // These are set in CTFPrecache() called from worldspawn
 int imageindex_i_ctf1;
 int imageindex_i_ctf2;
+int imageindex_i_ctf3;
+int imageindex_i_ctf4;
 int imageindex_i_ctf1d;
 int imageindex_i_ctf2d;
 int imageindex_i_ctf1t;
@@ -108,6 +110,8 @@ int imageindex_i_ctf2t;
 int imageindex_i_ctfj;
 int imageindex_sbfctf1;
 int imageindex_sbfctf2;
+int imageindex_sbfctf3;
+int imageindex_sbfctf4;
 int imageindex_ctfsb1;
 int imageindex_ctfsb2;
 int modelindex_flag1, modelindex_flag2; // [Paril-KEX]
@@ -234,6 +238,8 @@ void CTFPrecache()
 {
 	imageindex_i_ctf1 = gi.imageindex("i_ctf1");
 	imageindex_i_ctf2 = gi.imageindex("i_ctf2");
+	imageindex_i_ctf3 = gi.imageindex("i_ctf3");
+	imageindex_i_ctf4 = gi.imageindex("i_ctf4");
 	imageindex_i_ctf1d = gi.imageindex("i_ctf1d");
 	imageindex_i_ctf2d = gi.imageindex("i_ctf2d");
 	imageindex_i_ctf1t = gi.imageindex("i_ctf1t");
@@ -241,6 +247,8 @@ void CTFPrecache()
 	imageindex_i_ctfj = gi.imageindex("i_ctfj");
 	imageindex_sbfctf1 = gi.imageindex("sbfctf1");
 	imageindex_sbfctf2 = gi.imageindex("sbfctf2");
+	imageindex_sbfctf3 = gi.imageindex("sbfctf3");
+	imageindex_sbfctf4 = gi.imageindex("sbfctf4");
 	imageindex_ctfsb1 = gi.imageindex("tag4");
 	imageindex_ctfsb2 = gi.imageindex("tag5");
 	modelindex_flag1 = gi.modelindex("players/male/flag1.md2");
@@ -997,21 +1005,18 @@ void CTFID_f(edict_t *ent)
 	}
 }
 
-static void CTFSetIDView(edict_t *ent)
+static void CTFSetIDView(edict_t* ent)
 {
 	vec3_t	 forward, dir;
 	trace_t	 tr;
-	edict_t *who, *best;
+	edict_t* who, * best;
 	float	 bd = 0, d;
-
 	// only check every few frames
 	if (level.time - ent->client->resp.lastidtime < 250_ms)
 		return;
 	ent->client->resp.lastidtime = level.time;
-
 	ent->client->ps.stats[STAT_CTF_ID_VIEW] = 0;
 	ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = 0;
-
 	AngleVectors(ent->client->v_angle, forward, nullptr, nullptr);
 	forward *= 1024;
 	forward = ent->s.origin + forward;
@@ -1023,9 +1028,12 @@ static void CTFSetIDView(edict_t *ent)
 			ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = imageindex_sbfctf1;
 		else if (tr.ent->client->resp.ctf_team == CTF_TEAM2)
 			ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = imageindex_sbfctf2;
+		else if (tr.ent->client->resp.ctf_team == CTF_TEAM3)
+			ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = imageindex_sbfctf3;
+		else if (tr.ent->client->resp.ctf_team == CTF_TEAM4)
+			ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = imageindex_sbfctf4;
 		return;
 	}
-
 	AngleVectors(ent->client->v_angle, forward, nullptr, nullptr);
 	best = nullptr;
 	for (uint32_t i = 1; i <= game.maxclients; i++)
@@ -1036,11 +1044,9 @@ static void CTFSetIDView(edict_t *ent)
 		dir = who->s.origin - ent->s.origin;
 		dir.normalize();
 		d = forward.dot(dir);
-
 		// we have teammate indicators that are better for this
 		if (ent->client->resp.ctf_team == who->client->resp.ctf_team)
 			continue;
-
 		if (d > bd && loc_CanSee(ent, who))
 		{
 			bd = d;
@@ -1054,25 +1060,24 @@ static void CTFSetIDView(edict_t *ent)
 			ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = imageindex_sbfctf1;
 		else if (best->client->resp.ctf_team == CTF_TEAM2)
 			ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = imageindex_sbfctf2;
+		else if (best->client->resp.ctf_team == CTF_TEAM3)
+			ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = imageindex_sbfctf3;
+		else if (best->client->resp.ctf_team == CTF_TEAM4)
+			ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = imageindex_sbfctf4;
 	}
 }
 
-void SetCTFStats(edict_t *ent)
+void SetCTFStats(edict_t* ent)
 {
 	uint32_t i;
-	int		 p1, p2;
-	edict_t *e;
-
 	if (ctfgame.match > MATCH_NONE)
 		ent->client->ps.stats[STAT_CTF_MATCH] = CONFIG_CTF_MATCH;
 	else
 		ent->client->ps.stats[STAT_CTF_MATCH] = 0;
-
 	if (ctfgame.warnactive)
 		ent->client->ps.stats[STAT_CTF_TEAMINFO] = CONFIG_CTF_TEAMINFO;
 	else
 		ent->client->ps.stats[STAT_CTF_TEAMINFO] = 0;
-
 	// ghosting
 	if (ent->client->resp.ghost)
 	{
@@ -1080,33 +1085,6 @@ void SetCTFStats(edict_t *ent)
 		Q_strlcpy(ent->client->resp.ghost->netname, ent->client->pers.netname, sizeof(ent->client->resp.ghost->netname));
 		ent->client->resp.ghost->number = ent->s.number;
 	}
-
-	// logo headers for the frag display
-	ent->client->ps.stats[STAT_CTF_TEAM1_HEADER] = imageindex_ctfsb1;
-	ent->client->ps.stats[STAT_CTF_TEAM2_HEADER] = imageindex_ctfsb2;
-
-	bool blink = (level.time.milliseconds() % 1000) < 500;
-
-	// if during intermission, we must blink the team header of the winning team
-	if (level.intermissiontime && blink)
-	{
-		// blink half second
-		// note that ctfgame.total[12] is set when we go to intermission
-		if (ctfgame.team1 > ctfgame.team2)
-			ent->client->ps.stats[STAT_CTF_TEAM1_HEADER] = 0;
-		else if (ctfgame.team2 > ctfgame.team1)
-			ent->client->ps.stats[STAT_CTF_TEAM2_HEADER] = 0;
-		else if (ctfgame.total1 > ctfgame.total2) // frag tie breaker
-			ent->client->ps.stats[STAT_CTF_TEAM1_HEADER] = 0;
-		else if (ctfgame.total2 > ctfgame.total1)
-			ent->client->ps.stats[STAT_CTF_TEAM2_HEADER] = 0;
-		else
-		{ // tie game!
-			ent->client->ps.stats[STAT_CTF_TEAM1_HEADER] = 0;
-			ent->client->ps.stats[STAT_CTF_TEAM2_HEADER] = 0;
-		}
-	}
-
 	// tech icon
 	i = 0;
 	ent->client->ps.stats[STAT_CTF_TECH] = 0;
@@ -1119,129 +1097,52 @@ void SetCTFStats(edict_t *ent)
 		}
 	}
 
-	if (ctf->integer)
+	// Count players on each team
+	uint32_t num1 = 0, num2 = 0, num3 = 0, num4 = 0;
+	for (uint32_t j = 1; j <= game.maxclients; j++)
 	{
-		// figure out what icon to display for team logos
-		// three states:
-		//   flag at base
-		//   flag taken
-		//   flag dropped
-		p1 = imageindex_i_ctf1;
-		e = G_FindByString<&edict_t::classname>(nullptr, "item_flag_team1");
-		if (e != nullptr)
-		{
-			if (e->solid == SOLID_NOT)
-			{
-				// not at base
-				// check if on player
-				p1 = imageindex_i_ctf1d; // default to dropped
-				for (i = 1; i <= game.maxclients; i++)
-					if (g_edicts[i].inuse &&
-						g_edicts[i].client->pers.inventory[IT_FLAG1])
-					{
-						// enemy has it
-						p1 = imageindex_i_ctf1t;
-						break;
-					}
+		edict_t* player = &g_edicts[j];
+		if (!player->inuse)
+			continue;
+		if (player->client->resp.ctf_team == CTF_TEAM1) num1++;
+		else if (player->client->resp.ctf_team == CTF_TEAM2) num2++;
+		else if (player->client->resp.ctf_team == CTF_TEAM3) num3++;
+		else if (player->client->resp.ctf_team == CTF_TEAM4) num4++;
+	}
 
-				// [Paril-KEX] make sure there is a dropped version on the map somewhere
-				if (p1 == imageindex_i_ctf1d)
-				{
-					e = G_FindByString<&edict_t::classname>(e, "item_flag_team1");
+	// Determine which teams are unlocked
+	bool green_unlocked = (num1 >= 5 && num2 >= 5);
+	bool yellow_unlocked = (green_unlocked && num3 >= 5);
 
-					if (e == nullptr)
-					{
-						CTFResetFlag(CTF_TEAM1);
-						gi.LocBroadcast_Print(PRINT_HIGH, "$g_flag_returned",
-							CTFTeamName(CTF_TEAM1));
-						gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("ctf/flagret.wav"), 1, ATTN_NONE, 0);
-					}
-				}
-			}
-			else if (e->spawnflags.has(SPAWNFLAG_ITEM_DROPPED))
-				p1 = imageindex_i_ctf1d; // must be dropped
-		}
-		p2 = imageindex_i_ctf2;
-		e = G_FindByString<&edict_t::classname>(nullptr, "item_flag_team2");
-		if (e != nullptr)
-		{
-			if (e->solid == SOLID_NOT)
-			{
-				// not at base
-				// check if on player
-				p2 = imageindex_i_ctf2d; // default to dropped
-				for (i = 1; i <= game.maxclients; i++)
-					if (g_edicts[i].inuse &&
-						g_edicts[i].client->pers.inventory[IT_FLAG2])
-					{
-						// enemy has it
-						p2 = imageindex_i_ctf2t;
-						break;
-					}
+	// Red and Blue always show
+	ent->client->ps.stats[STAT_CTF_TEAM1_PIC] = imageindex_i_ctf1;
+	ent->client->ps.stats[STAT_CTF_TEAM2_PIC] = imageindex_i_ctf2;
+	ent->client->ps.stats[STAT_CTF_TEAM1_CAPS] = ctfgame.total1;
+	ent->client->ps.stats[STAT_CTF_TEAM2_CAPS] = ctfgame.total2;
 
-				// [Paril-KEX] make sure there is a dropped version on the map somewhere
-				if (p2 == imageindex_i_ctf2d)
-				{
-					e = G_FindByString<&edict_t::classname>(e, "item_flag_team2");
-
-					if (e == nullptr)
-					{
-						CTFResetFlag(CTF_TEAM2);
-						gi.LocBroadcast_Print(PRINT_HIGH, "$g_flag_returned",
-							CTFTeamName(CTF_TEAM2));
-						gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("ctf/flagret.wav"), 1, ATTN_NONE, 0);
-					}
-				}
-			}
-			else if (e->spawnflags.has(SPAWNFLAG_ITEM_DROPPED))
-				p2 = imageindex_i_ctf2d; // must be dropped
-		}
-
-		ent->client->ps.stats[STAT_CTF_TEAM1_PIC] = p1;
-		ent->client->ps.stats[STAT_CTF_TEAM2_PIC] = p2;
-
-		if (ctfgame.last_flag_capture && level.time - ctfgame.last_flag_capture < 5_sec)
-		{
-			if (ctfgame.last_capture_team == CTF_TEAM1)
-				if (blink)
-					ent->client->ps.stats[STAT_CTF_TEAM1_PIC] = p1;
-				else
-					ent->client->ps.stats[STAT_CTF_TEAM1_PIC] = 0;
-			else if (blink)
-				ent->client->ps.stats[STAT_CTF_TEAM2_PIC] = p2;
-			else
-				ent->client->ps.stats[STAT_CTF_TEAM2_PIC] = 0;
-		}
-
-		ent->client->ps.stats[STAT_CTF_TEAM1_CAPS] = ctfgame.team1;
-		ent->client->ps.stats[STAT_CTF_TEAM2_CAPS] = ctfgame.team2;
-
-		ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
-		if (ent->client->resp.ctf_team == CTF_TEAM1 &&
-			ent->client->pers.inventory[IT_FLAG2] &&
-			(blink))
-			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = imageindex_i_ctf2;
-
-		else if (ent->client->resp.ctf_team == CTF_TEAM2 &&
-				 ent->client->pers.inventory[IT_FLAG1] &&
-				 (blink))
-			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = imageindex_i_ctf1;
+	// Green only shows if unlocked
+	if (green_unlocked)
+	{
+		ent->client->ps.stats[STAT_CTF_TEAM3_PIC] = imageindex_i_ctf3;
+		ent->client->ps.stats[STAT_CTF_TEAM3_CAPS] = ctfgame.total3;
 	}
 	else
 	{
-		ent->client->ps.stats[STAT_CTF_TEAM1_PIC] = imageindex_i_ctf1;
-		ent->client->ps.stats[STAT_CTF_TEAM2_PIC] = imageindex_i_ctf2;
-
-		ent->client->ps.stats[STAT_CTF_TEAM1_CAPS] = ctfgame.total1;
-		ent->client->ps.stats[STAT_CTF_TEAM2_CAPS] = ctfgame.total2;
+		ent->client->ps.stats[STAT_CTF_TEAM3_PIC] = 0;
+		ent->client->ps.stats[STAT_CTF_TEAM3_CAPS] = 0;
 	}
 
-	ent->client->ps.stats[STAT_CTF_JOINED_TEAM1_PIC] = 0;
-	ent->client->ps.stats[STAT_CTF_JOINED_TEAM2_PIC] = 0;
-	if (ent->client->resp.ctf_team == CTF_TEAM1)
-		ent->client->ps.stats[STAT_CTF_JOINED_TEAM1_PIC] = imageindex_i_ctfj;
-	else if (ent->client->resp.ctf_team == CTF_TEAM2)
-		ent->client->ps.stats[STAT_CTF_JOINED_TEAM2_PIC] = imageindex_i_ctfj;
+	// Yellow only shows if unlocked
+	if (yellow_unlocked)
+	{
+		ent->client->ps.stats[STAT_CTF_TEAM4_PIC] = imageindex_i_ctf4;
+		ent->client->ps.stats[STAT_CTF_TEAM4_CAPS] = ctfgame.total4;
+	}
+	else
+	{
+		ent->client->ps.stats[STAT_CTF_TEAM4_PIC] = 0;
+		ent->client->ps.stats[STAT_CTF_TEAM4_CAPS] = 0;
+	}
 
 	if (ent->client->resp.id_state)
 		CTFSetIDView(ent);
@@ -1250,9 +1151,8 @@ void SetCTFStats(edict_t *ent)
 		ent->client->ps.stats[STAT_CTF_ID_VIEW] = 0;
 		ent->client->ps.stats[STAT_CTF_ID_VIEW_COLOR] = 0;
 	}
-}
 
-/*------------------------------------------------------------------------*/
+}/*------------------------------------------------------------------------*/
 
 /*QUAKED info_player_team1 (1 0 0) (-16 -16 -24) (16 16 32)
 potential team1 spawning position for ctf games

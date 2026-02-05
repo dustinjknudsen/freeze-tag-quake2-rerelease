@@ -1389,16 +1389,17 @@ void ClientEndServerFrame(edict_t *ent)
 	// If it wasn't updated here, the view position would lag a frame
 	// behind the body position when pushed -- "sinking into plats"
 	//
-	/* freeze */
-	if (current_client->frozen && current_client->chase_target)
+/* freeze */
+	if ((current_client->frozen || current_client->thirdperson) && current_client->chase_target)
 		UpdateChaseCam(ent);
 	else {
-	/* freeze */
-	current_client->ps.pmove.origin = ent->s.origin;
-	current_client->ps.pmove.velocity = ent->velocity;
-	/* freeze */
+		/* freeze */
+		current_client->ps.pmove.origin = ent->s.origin;
+		current_client->ps.pmove.velocity = ent->velocity;
+		/* freeze */
 	}
 	/* freeze */
+
 
 	//
 	// If the end of unit layout is displayed, don't give
@@ -1487,8 +1488,8 @@ void ClientEndServerFrame(edict_t *ent)
 	// apply all the damage taken this frame
 	P_DamageFeedback(ent);
 
-	// determine the view offsets (skip for spectators/frozen players in chase mode)
-	if (!(ent->client->chase_target && (ent->client->resp.spectator || ent->client->frozen)))
+	// determine the view offsets (skip for spectators/frozen players in chase mode AND third-person mode)
+	if (!(ent->client->chase_target && (ent->client->resp.spectator || ent->client->frozen || ent->client->thirdperson)))
 		SV_CalcViewOffset(ent);
 
 	// determine the gun offsets

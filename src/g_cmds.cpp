@@ -521,6 +521,50 @@ void Cmd_Teleport_f(edict_t *ent)
 	gi.linkentity(ent);
 }
 
+void Cmd_ThirdPerson_f(edict_t* ent)
+{
+	if (!ent->client)
+		return;
+
+	if (ent->client->resp.spectator)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Third-person not available for spectators\n");
+		return;
+	}
+
+	if (ent->client->frozen)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Third-person not available while frozen\n");
+		return;
+	}
+
+	if (ent->health <= 0)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Third-person not available while dead\n");
+		return;
+	}
+
+	ent->client->thirdperson = !ent->client->thirdperson;
+
+	if (ent->client->thirdperson)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Third-person mode enabled\n");
+		ent->client->chase_target = ent;
+		ent->client->update_chase = true;
+	}
+	else
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Third-person mode disabled\n");
+
+		// Clean up ghost entity
+		RemoveThirdPersonGhost(ent);
+
+		ent->client->chase_target = nullptr;
+		ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
+		ent->client->ps.viewoffset = {};
+	}
+}
+
 /*
 ==================
 Cmd_Notarget_f
@@ -1771,6 +1815,8 @@ void ClientCommand(edict_t *ent)
 	/* freeze */
 	else if (Q_strcasecmp(cmd, "hook") == 0)
 		cmdHook(ent);
+	else if (Q_strcasecmp(cmd, "thirdperson") == 0)
+		Cmd_ThirdPerson_f(ent);
 	/* freeze */
 #ifndef KEX_Q2_GAME
 	else // anything that doesn't match a command will be a chat

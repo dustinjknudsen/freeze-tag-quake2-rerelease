@@ -83,6 +83,69 @@ cvar_t* start_armor;
 cvar_t* grapple_wall;
 static int	gib_queue;
 static int	moan[8];
+int team_max_count;
+//==============================================================
+// Third-Person Ghost Entity - for seeing yourself in third person
+//==============================================================
+
+void CreateThirdPersonGhost(edict_t* ent)
+{
+	// Don't create if already exists or not in third-person
+	if (ent->client->thirdperson_body || !ent->client->thirdperson)
+		return;
+
+	edict_t* ghost = G_Spawn();
+	if (!ghost)
+		return;
+
+	// Copy visual state from the player
+	ghost->s = ent->s;
+	ghost->s.number = ghost - g_edicts;
+
+	// Set up as an intangible visual-only entity
+	ghost->classname = "thirdperson_ghost";
+	ghost->solid = SOLID_NOT;
+	ghost->movetype = MOVETYPE_NONE;
+	ghost->takedamage = false;
+	ghost->owner = ent;
+
+	// Copy position and bounds
+	ghost->s.origin = ent->s.origin;
+	ghost->mins = ent->mins;
+	ghost->maxs = ent->maxs;
+
+	gi.linkentity(ghost);
+
+	ent->client->thirdperson_body = ghost;
+}
+
+void UpdateThirdPersonGhost(edict_t* ent)
+{
+	if (!ent->client->thirdperson_body)
+		return;
+
+	edict_t* ghost = ent->client->thirdperson_body;
+
+	// Keep the ghost synced with the player's state
+	ghost->s.origin = ent->s.origin;
+	ghost->s.angles = ent->s.angles;
+	ghost->s.frame = ent->s.frame;
+	ghost->s.skinnum = ent->s.skinnum;
+	ghost->s.effects = ent->s.effects;
+	ghost->s.renderfx = ent->s.renderfx;
+	ghost->s.modelindex = ent->s.modelindex;
+
+	gi.linkentity(ghost);
+}
+
+void RemoveThirdPersonGhost(edict_t* ent)
+{
+	if (!ent->client->thirdperson_body)
+		return;
+
+	G_FreeEdict(ent->client->thirdperson_body);
+	ent->client->thirdperson_body = nullptr;
+}
 
 //==============================================================
 // Frozen Body Ghost Entity - for chase camera visibility
@@ -1103,7 +1166,7 @@ void freezeIntermission(void)
 		gi.LocBroadcast_Print(PRINT_HIGH, "Stalemate!\n");
 		return;
 	}
-	gi.LocBroadcast_Print(PRINT_HIGH, "{} team is the winner!\n", freeze_team[team]);
+	gi.LocBroadcast_Print(PRINT_HIGH, "{} TEAM IS THE WINNER!\n", freeze_team[team]);
 }
 
 void playerHealth(edict_t* ent)
@@ -1133,11 +1196,15 @@ void breakTeam(int team)
 			continue;
 		if (ent->client->frozen)
 		{
+			// Only break frozen players from the losing team when 3+ teams are active
+			if (ent->client->resp.ctf_team != get_team_enum(team) && team_max_count >= 3)
+				continue;
 			ent->client->frozen_time = break_time;
 			break_time += 250_ms;
 			continue;
 		}
-		if (ent->health > 0)
+		// Only restore health/weapons when less than 3 teams
+		if (ent->health > 0 && team_max_count < 3)
 		{
 			playerHealth(ent);
 			playerWeapon(ent);
@@ -1197,20 +1264,60 @@ bool endCheck()
 {
 	int	i;
 
-	// Loop 4 times
+	// Update team_max_count based on player counts
+	int total[4] = { 0, 0, 0, 0 };
+
+	for (uint32_t j = 0; j < game.maxclients; j++)
+	{
+		edict_t* ent = g_edicts + 1 + j;
+		if (!ent->inuse)
+			continue;
+		if (ent->client->resp.spectator)
+			continue;
+
+		if (ent->client->resp.ctf_team == CTF_TEAM1)
+			total[0]++;
+		else if (ent->client->resp.ctf_team == CTF_TEAM2)
+			total[1]++;
+		else if (ent->client->resp.ctf_team == CTF_TEAM3)
+			total[2]++;
+		else if (ent->client->resp.ctf_team == CTF_TEAM4)
+			total[3]++;
+	}
+
+	// Determine how many teams are active
+	if (total[3] > 0)
+		team_max_count = 4;
+	else if (total[2] > 0)
+		team_max_count = 3;
+	else if (total[0] >= 5 && total[1] >= 5)
+		team_max_count = 3;
+	else
+		team_max_count = 2;
+
+	// Update teams
 	for (i = 0; i < 4; i++)
-		if (/*freeze[i].update && */level.time > freeze[i].last_update)
+		if (level.time > freeze[i].last_update)
 		{
 			updateTeam(i);
 			freeze[i].update = false;
 			freeze[i].last_update = level.time + 3_sec;
 		}
 
+	// Dynamic point limit based on number of teams
 	if (capturelimit->value)
 	{
-		// Loop 4 times
+		int point_limit;
+
+		if (team_max_count >= 4)
+			point_limit = 15;
+		else if (team_max_count >= 3)
+			point_limit = 12;
+		else
+			point_limit = (int)capturelimit->value;  // Default (e.g., 8)
+
 		for (i = 0; i < 4; i++)
-			if (get_team_score(i) >= capturelimit->value)
+			if (get_team_score(i) >= point_limit)
 				return true;
 	}
 
@@ -1223,7 +1330,7 @@ void cmdMoan(edict_t* ent)
 	{
 		ent->client->showscores = false;
 		ent->client->resp.help |= frozen_help;
-		gi.LocCenter_Print(ent, "You have been frozen.\nWait to be saved.");
+		gi.LocCenter_Print(ent, "You have been frozen.\nWait to be saved. \nUse '[' or ']' for Chasecam.");
 		gi.sound(ent, CHAN_AUTO, gi.soundindex("misc/talk1.wav"), 1, ATTN_STATIC, 0);
 	}
 	//else if (!(ent->client->chase_target || ent->client->resp.help & chase_help) && !(ent->svflags & SVF_BOT))
@@ -1745,6 +1852,7 @@ void freezeSpawn()
 		freeze[i].last_update = level.time;
 	}
 	gib_queue = 0;
+	team_max_count = 2;
 
 	moan[0] = gi.soundindex("insane/insane1.wav");
 	moan[1] = gi.soundindex("insane/insane2.wav");

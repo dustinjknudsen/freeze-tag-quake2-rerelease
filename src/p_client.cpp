@@ -3267,7 +3267,8 @@ void ClientThink(edict_t* ent, usercmd_t* ucmd)
 		return;
 	}
 
-	if (ent->client->chase_target)
+	// Chase camera for spectating others (not third-person self-chase)
+	if (ent->client->chase_target && !ent->client->thirdperson)
 	{
 		client->resp.cmd_angles = ucmd->angles;
 		if (!ent->client->frozen)
@@ -3275,6 +3276,7 @@ void ClientThink(edict_t* ent, usercmd_t* ucmd)
 	}
 	else
 	{
+		// Normal movement (including when in third-person mode)
 
 		// set up for pmove
 		memset(&pm, 0, sizeof(pm));
@@ -3325,7 +3327,12 @@ void ClientThink(edict_t* ent, usercmd_t* ucmd)
 		pm.trace = gi.game_import_t::trace;
 		pm.clip = SV_PM_Clip;
 		pm.pointcontents = gi.pointcontents;
-		pm.viewoffset = ent->client->ps.viewoffset;
+
+		// For third-person mode, don't pass viewoffset to pmove (it's for camera only)
+		if (ent->client->thirdperson)
+			pm.viewoffset = {};
+		else
+			pm.viewoffset = ent->client->ps.viewoffset;
 
 		// perform a pmove
 		Pmove(&pm);
@@ -3511,11 +3518,15 @@ void ClientThink(edict_t* ent, usercmd_t* ucmd)
 	}
 	freeze */
 
-	// update chase cam if being followed
+	// Update third-person camera for self
+	if (ent->client->thirdperson && ent->client->chase_target == ent && ent->health > 0)
+		UpdateChaseCam(ent);
+
+	// update chase cam if being followed by others
 	for (i = 1; i <= game.maxclients; i++)
 	{
 		other = g_edicts + i;
-		if (other->inuse && other->client->chase_target == ent)
+		if (other->inuse && other->client->chase_target == ent && other != ent)
 			UpdateChaseCam(other);
 	}
 }

@@ -66,6 +66,8 @@ extern cvar_t* frozen_time;
 extern cvar_t* start_weapon;
 extern cvar_t* start_armor;
 extern cvar_t* grapple_wall;
+extern void Cmd_ThirdPerson_f(edict_t* ent);
+extern int team_max_count;
 
 //================================================================================================
 // SECTION 5: CORE GAME FLOW AND STATE MANAGEMENT
@@ -88,6 +90,9 @@ void cmdMoan(edict_t* ent);      // Triggers the "Help me!" sound/message for fr
 void playerShell(edict_t* ent, ctfteam_t team); // Applies the team-colored ice shell effect
 void freezeEffects(edict_t* ent); // Updates effects like thaw pulse or solid shell
 void FreezeScoreboardMessage(edict_t* ent, edict_t* killer);
+void CreateThirdPersonGhost(edict_t* ent);
+void UpdateThirdPersonGhost(edict_t* ent);
+void RemoveThirdPersonGhost(edict_t* ent);
 
 //================================================================================================
 // SECTION 7: GIB/SHATTER LOGIC
