@@ -1118,11 +1118,9 @@ void G_CheckChaseStats(edict_t *ent)
 G_SetSpectatorStats
 ===============
 */
-
 void G_SetSpectatorStats(edict_t* ent)
 {
 	gclient_t* cl = ent->client;
-
 	// If we aren't chasing anyone, just set normal stats
 	if (!cl->chase_target)
 	{
@@ -1130,78 +1128,77 @@ void G_SetSpectatorStats(edict_t* ent)
 		return;
 	}
 
+	// For third-person mode, populate normal HUD stats first
+	if (cl->thirdperson)
+		G_SetStats(ent);
+
 	/* freeze */
 	if (cl->resp.spectator)
 		/* freeze */
 		cl->ps.stats[STAT_SPECTATOR] = 1;
-
 	// layouts are independant in spectator
 	cl->ps.stats[STAT_LAYOUTS] = 0;
 	if (cl->pers.health <= 0 || level.intermissiontime || cl->showscores)
 		cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
 	if (cl->showinventory && cl->pers.health > 0)
 		cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
-
-	if (cl->chase_target && cl->chase_target->inuse) {
+	// Never set STAT_CHASE - engine interprets it as a player index and renders ##P<n>
+	cl->ps.stats[STAT_CHASE] = 0;
+	int client_idx = (int)(ent - g_edicts) - 1;
+	if (cl->chase_target && cl->chase_target->inuse && client_idx >= 0 && client_idx < 64) {
+		// Get real name from configstring (netname contains ##P<n> for humans)
+		int target_idx = (int)(cl->chase_target - g_edicts) - 1;
+		const char* target_name = gi.get_configstring(CONFIG_CTF_PLAYER_NAME + target_idx);
 		// 1. Update the "Chasing 'Name'" display
-		int cs_index = CS_GENERAL + (ent - g_edicts);
-		gi.configstring(cs_index, G_Fmt("Chasing '{}'", cl->chase_target->client->pers.netname).data());
-		cl->ps.stats[STAT_CHASE] = cs_index;
-
+		int cs_index = CONFIG_CHASE_STRING + client_idx;
+		gi.configstring(cs_index, G_Fmt("Chasing '{}'", target_name).data());
+		cl->ps.stats[STAT_FT_CHASE] = cs_index;
 		// 2. Determine who the target is looking at ("Viewing 'Name'")
-		char* viewing_name = nullptr;
+		edict_t* viewing_ent = nullptr;
 		edict_t* target = cl->chase_target;
-
 		// Scenario A: Daisy Chaining
 		if (target->client->chase_target && target->client->chase_target->inuse)
 		{
-			viewing_name = target->client->chase_target->client->pers.netname;
+			viewing_ent = target->client->chase_target;
 		}
 		// Scenario B: Active Player
 		else
 		{
 			vec3_t forward, start, end;
 			trace_t tr;
-
 			// Get direction
 			AngleVectors(target->client->v_angle, forward, nullptr, nullptr);
-
 			// Start at eyes
-			// FIX: Use assignment instead of VectorCopy
 			start = target->s.origin;
 			start[2] += target->viewheight;
-
 			// Calculate end point (8192 units forward)
-			// FIX: Use vector math instead of VectorMA
 			end = start + (forward * 8192);
-
 			// Perform trace
-			// FIX: Use vec3_origin instead of NULL for mins/maxs
 			tr = gi.trace(start, vec3_origin, vec3_origin, end, target, MASK_SHOT);
-
 			if (tr.ent && tr.ent->client && tr.ent->inuse)
 			{
-				viewing_name = tr.ent->client->pers.netname;
+				viewing_ent = tr.ent;
 			}
 		}
-
 		// 3. Set the Viewing string and stat
-		if (viewing_name)
+		if (viewing_ent)
 		{
-			gi.configstring(CONFIG_FT_VIEWED_STRING, G_Fmt("Viewing {}", viewing_name).data());
-			cl->ps.stats[STAT_FT_VIEWED] = CONFIG_FT_VIEWED_STRING;
+			int viewed_idx = (int)(viewing_ent - g_edicts) - 1;
+			const char* viewed_name = gi.get_configstring(CONFIG_CTF_PLAYER_NAME + viewed_idx);
+			int viewed_cs = CONFIG_FT_VIEWED_STRING + client_idx;
+			gi.configstring(viewed_cs, G_Fmt("Viewing {}", viewed_name).data());
+			cl->ps.stats[STAT_FT_VIEWED] = viewed_cs;
 		}
 		else
 		{
 			cl->ps.stats[STAT_FT_VIEWED] = 0;
 		}
-
 		cl->ps.stats[STAT_CTF_ID_VIEW] = 0;
 		cl->ps.stats[STAT_CTF_ID_VIEW_COLOR] = 0;
 	}
 	else
 	{
-		cl->ps.stats[STAT_CHASE] = 0;
+		cl->ps.stats[STAT_FT_CHASE] = 0;
 		cl->ps.stats[STAT_FT_VIEWED] = 0;
 		cl->ps.stats[STAT_CTF_ID_VIEW] = 0;
 		cl->ps.stats[STAT_CTF_ID_VIEW_COLOR] = 0;

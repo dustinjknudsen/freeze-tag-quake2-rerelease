@@ -894,6 +894,13 @@ void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, 
 	{
 		if (state == READY_FIRING)
 		{
+			// Check if we have spawn protection active
+			if (ent->client->spawn_protection_time > level.time)
+			{
+				// Use level.time to expire it immediately
+				ent->client->spawn_protection_time = level.time;
+			}
+
 			ent->client->ps.gunframe = FRAME_FIRE_FIRST;
 			ent->client->weapon_fire_buffered = false;
 

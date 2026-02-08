@@ -635,13 +635,17 @@ void SV_CalcBlend(edict_t *ent)
 		if (G_PowerUpExpiringRelative(remaining))
 			G_AddBlend(0.4f, 1, 0.4f, 0.04f, ent->client->ps.screen_blend);
 	}
-	/* freeze */
+		/* freeze */
 	else if (ent->client->frozen && !ent->client->chase_target && (!ent->client->resp.thawer || ((level.time.milliseconds() / 100) % 16) < 8))
 	{
 		if (ent->client->resp.ctf_team == CTF_TEAM1)
 			G_AddBlend(0.6f, 0, 0, 0.4f, ent->client->ps.screen_blend);
 		else if (ent->client->resp.ctf_team == CTF_TEAM2)
 			G_AddBlend(0.6f, 0.6f, 0.6f, 0.4f, ent->client->ps.screen_blend);
+		else if (ent->client->resp.ctf_team == CTF_TEAM3)
+			G_AddBlend(0, 0.6f, 0, 0.4f, ent->client->ps.screen_blend);
+		else if (ent->client->resp.ctf_team == CTF_TEAM4)
+			G_AddBlend(0.6f, 0.6f, 0, 0.4f, ent->client->ps.screen_blend);
 	}
 	/* freeze */
 
@@ -926,14 +930,13 @@ void G_SetClientEffects(edict_t *ent)
 
 	if (ent->client->quad_time > level.time)
 	{
-		if (G_PowerUpExpiring(ent->client->quad_time))
+		if (G_PowerUpExpiring(ent->client->quad_time) && powerupBlinkVisible())
 			CTFSetPowerUpEffect(ent, EF_QUAD);
 	}
-
 	// RAFAEL
 	if (ent->client->quadfire_time > level.time)
-	{;
-		if (G_PowerUpExpiring(ent->client->quadfire_time))
+	{
+		if (G_PowerUpExpiring(ent->client->quadfire_time) && powerupBlinkVisible())
 			CTFSetPowerUpEffect(ent, EF_DUALFIRE);
 	}
 	// RAFAEL
@@ -941,7 +944,7 @@ void G_SetClientEffects(edict_t *ent)
 	// ROGUE
 	if (ent->client->double_time > level.time)
 	{
-		if (G_PowerUpExpiring(ent->client->double_time))
+		if (G_PowerUpExpiring(ent->client->double_time) && powerupBlinkVisible())
 			CTFSetPowerUpEffect(ent, EF_DOUBLE);
 	}
 	if ((ent->client->owned_sphere) && (ent->client->owned_sphere->spawnflags == SPHERE_DEFENDER))
@@ -962,12 +965,18 @@ void G_SetClientEffects(edict_t *ent)
 			ent->s.alpha = std::clamp(x, 0.1f, 1.0f);
 		}
 	}
+	// Spawn protection shell
+	if (ent->client->spawn_protection_time > level.time)
+	{
+		ent->s.effects |= EF_COLOR_SHELL;
+		ent->s.renderfx |= RF_SHELL_HALF_DAM;
+	}
 	// ROGUE
 	//=======
 
 	if (ent->client->invincible_time > level.time)
 	{
-		if (G_PowerUpExpiring(ent->client->invincible_time))
+		if (G_PowerUpExpiring(ent->client->invincible_time) && powerupBlinkVisible())
 			CTFSetPowerUpEffect(ent, EF_PENT);
 	}
 
@@ -1503,13 +1512,22 @@ void ClientEndServerFrame(edict_t *ent)
 	// chase cam stuff
 	/* freeze */
 	if (ent->client->frozen)
+	{
 		G_SetSpectatorStats(ent);
-	else
-	/* freeze */
-	if (ent->client->resp.spectator)
+	}
+	else if (ent->client->thirdperson && ent->client->chase_target)
+	{
 		G_SetSpectatorStats(ent);
+	}
+	else if (ent->client->resp.spectator)
+	{
+		UpdateAutoChase(ent);
+		G_SetSpectatorStats(ent);
+	}
 	else
+	{
 		G_SetStats(ent);
+	}
 
 	G_CheckChaseStats(ent);
 

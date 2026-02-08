@@ -165,6 +165,8 @@ void Bot_UpdateDebug() {
 	/* freeze */
 	freezeBotHelper();
 	freezeBotHook();
+	freezeBotHookTaxi();
+	freezeBotDrown();
 	//freezeBotItemHook(); perhaps for future bot armor/megahealth hook logic
 	/* freeze */
 	if ( !sv_cheats->integer ) {

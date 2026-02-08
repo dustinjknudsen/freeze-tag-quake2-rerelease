@@ -1306,6 +1306,8 @@ static void G_InitStatusbar()
 	// picked up item
 	sb.ifstat(STAT_PICKUP_ICON).xv(0).pic(STAT_PICKUP_ICON).xv(26).yb(-42).loc_stat_string(STAT_PICKUP_STRING).yb(-50).endifstat();
 
+	sb.ifstat(STAT_LAST_ALIVE).xr(-150).yt(425).stat_string(STAT_LAST_ALIVE).endifstat();
+
 	// selected item name
 	sb.ifstat(STAT_SELECTED_ITEM_NAME).yb(-34).xv(319).loc_stat_rstring(STAT_SELECTED_ITEM_NAME).yb(-58).endifstat();
 
@@ -1365,16 +1367,16 @@ static void G_InitStatusbar()
 		//sb.yb(-56).xr(-26).string2("YEL").xr(-78).num(3, STAT_CTF_TEAM4_CAPS);
 
 		// Red team
-		sb.yb(-137).ifstat(STAT_CTF_TEAM1_PIC).xr(-26).pic(STAT_CTF_TEAM1_PIC).endifstat().xr(-78).num(3, STAT_CTF_TEAM1_CAPS);
+		sb.yb(-137).ifstat(STAT_CTF_TEAM1_PIC).xr(-26).pic(STAT_CTF_TEAM1_PIC).xr(-78).num(3, STAT_CTF_TEAM1_CAPS).endifstat();
 
 		// Blue team
-		sb.yb(-110).ifstat(STAT_CTF_TEAM2_PIC).xr(-26).pic(STAT_CTF_TEAM2_PIC).endifstat().xr(-78).num(3, STAT_CTF_TEAM2_CAPS);
+		sb.yb(-110).ifstat(STAT_CTF_TEAM2_PIC).xr(-26).pic(STAT_CTF_TEAM2_PIC).xr(-78).num(3, STAT_CTF_TEAM2_CAPS).endifstat();
 
 		// Green team
-		sb.yb(-83).ifstat(STAT_CTF_TEAM3_PIC).xr(-26).pic(STAT_CTF_TEAM3_PIC).endifstat().xr(-78).num(3, STAT_CTF_TEAM3_CAPS);
+		sb.yb(-83).ifstat(STAT_CTF_TEAM3_PIC).xr(-26).pic(STAT_CTF_TEAM3_PIC).xr(-78).num(3, STAT_CTF_TEAM3_CAPS).endifstat();
 
 		// Yellow team
-		sb.yb(-56).ifstat(STAT_CTF_TEAM4_PIC).xr(-26).pic(STAT_CTF_TEAM4_PIC).endifstat().xr(-78).num(3, STAT_CTF_TEAM4_CAPS);
+		sb.yb(-56).ifstat(STAT_CTF_TEAM4_PIC).xr(-26).pic(STAT_CTF_TEAM4_PIC).xr(-78).num(3, STAT_CTF_TEAM4_CAPS).endifstat();
 
 		// id view state
 		sb.ifstat(STAT_CTF_ID_VIEW).xv(112).yb(-58).stat_pname(STAT_CTF_ID_VIEW).endifstat();
@@ -1387,7 +1389,7 @@ static void G_InitStatusbar()
 		// Viewing display (for frozen players and spectators)
 		sb.ifstat(STAT_FT_VIEWED).xv(0).yb(-78).stat_string(STAT_FT_VIEWED).endifstat();
 		// Chase target display
-		sb.ifstat(STAT_CHASE).xv(0).yb(-68).stat_string(STAT_CHASE).endifstat();
+		sb.ifstat(STAT_FT_CHASE).xv(0).yb(-68).stat_string(STAT_FT_CHASE).endifstat();
 		// spectator
 		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).string2("SPECTATOR MODE").endifstat();
 	}
@@ -1401,13 +1403,13 @@ static void G_InitStatusbar()
 		sb.ifstat(STAT_FT_VIEWED).xv(0).yb(-78).stat_string(STAT_FT_VIEWED).endifstat();
 
 		// Chase target display 
-		sb.ifstat(STAT_CHASE).xv(0).yb(-68).stat_string(STAT_CHASE).endifstat();
+		sb.ifstat(STAT_FT_CHASE).xv(0).yb(-68).stat_string(STAT_FT_CHASE).endifstat();
 
 		// spectator
 		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).string2("SPECTATOR MODE").endifstat();
 
 		// chase cam
-		//sb.ifstat(STAT_CHASE).xv(0).yb(-68).string("CHASING").xv(64).stat_string(STAT_CHASE).endifstat();
+		//sb.ifstat(STAT_FT_CHASE).xv(0).yb(-68).string("CHASING").xv(64).stat_string(STAT_FT_CHASE).endifstat();
 	}
 
 	// ---- more shared stuff ----

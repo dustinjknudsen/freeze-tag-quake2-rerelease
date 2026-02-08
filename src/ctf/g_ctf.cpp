@@ -50,7 +50,7 @@ struct ctfgame_t
 };
 
 ctfgame_t ctfgame;
-
+extern int team_max_count;
 cvar_t *ctf;
 cvar_t *teamplay;
 cvar_t *g_teamplay_force_join;
@@ -350,12 +350,22 @@ void CTFAssignTeam(gclient_t* who)
 {
 	edict_t* player;
 	uint32_t counts[4] = { 0, 0, 0, 0 };
-
 	who->resp.ctf_state = 0;
-
 	if (!g_teamplay_force_join->integer && !(g_edicts[1 + (who - game.clients)].svflags & SVF_BOT))
 	{
 		who->resp.ctf_team = CTF_NOTEAM;
+		return;
+	}
+
+	// Check if there's a pending team assignment for this bot
+	if ((g_edicts[1 + (who - game.clients)].svflags & SVF_BOT) && bot_pending_team != CTF_NOTEAM)
+	{
+		who->resp.ctf_team = bot_pending_team;
+		bot_pending_count--;
+		if (bot_pending_count <= 0) {
+			bot_pending_team = CTF_NOTEAM;
+			bot_pending_count = 0;
+		}
 		return;
 	}
 
@@ -375,8 +385,8 @@ void CTFAssignTeam(gclient_t* who)
 	}
 
 	// 2. Determine which teams are valid candidates
-	bool green_valid = (counts[0] >= 5 && counts[1] >= 5);
-	bool yellow_valid = (green_valid && counts[2] >= 5);
+	bool green_valid = (counts[0] >= 5 && counts[1] >= 5) || (counts[2] > 0);
+	bool yellow_valid = ((green_valid && counts[2] >= 5) || (counts[3] > 0));
 
 	// 3. Find smallest team (only among valid ones)
 	int smallest_count = counts[0];
@@ -1044,9 +1054,9 @@ static void CTFSetIDView(edict_t* ent)
 		dir = who->s.origin - ent->s.origin;
 		dir.normalize();
 		d = forward.dot(dir);
-		// we have teammate indicators that are better for this
-		if (ent->client->resp.ctf_team == who->client->resp.ctf_team)
-			continue;
+		//// we have teammate indicators that are better for this
+		//if (ent->client->resp.ctf_team == who->client->resp.ctf_team)
+		//	continue;
 		if (d > bd && loc_CanSee(ent, who))
 		{
 			bd = d;
@@ -1111,8 +1121,8 @@ void SetCTFStats(edict_t* ent)
 	}
 
 	// Determine which teams are unlocked
-	bool green_unlocked = (num1 >= 5 && num2 >= 5);
-	bool yellow_unlocked = (green_unlocked && num3 >= 5);
+	bool green_unlocked = (num1 >= 5 && num2 >= 5) || (num3 > 0);
+	bool yellow_unlocked = ((green_unlocked && num3 >= 5) || (num4 > 0));
 
 	// Red and Blue always show
 	ent->client->ps.stats[STAT_CTF_TEAM1_PIC] = imageindex_i_ctf1;
@@ -1468,28 +1478,24 @@ void CTFDirtyTeamMenu()
 		}
 }
 
-void CTFTeam_f(edict_t *ent)
+void CTFTeam_f(edict_t* ent)
 {
 	if (!G_TeamplayEnabled())
 		return;
-
-	const char *t;
+	const char* t;
 	ctfteam_t	  desired_team;
-
 	t = gi.args();
 	if (!*t)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_you_are_on_team",
-				   CTFTeamName(ent->client->resp.ctf_team));
+			CTFTeamName(ent->client->resp.ctf_team));
 		return;
 	}
-
 	if (ctfgame.match > MATCH_SETUP)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_cant_change_teams");
 		return;
 	}
-
 	// [Paril-KEX] with force-join, don't allow us to switch
 	// using this command.
 	if (g_teamplay_force_join->integer)
@@ -1500,7 +1506,12 @@ void CTFTeam_f(edict_t *ent)
 			return;
 		}
 	}
-
+	/* freeze */
+	if (ent->client->frozen) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Can't change teams while frozen.\n");
+		return;
+	}
+	/* freeze */
 	if (Q_strcasecmp(t, "red") == 0)
 		desired_team = CTF_TEAM1;
 	else if (Q_strcasecmp(t, "blue") == 0)
@@ -1514,21 +1525,61 @@ void CTFTeam_f(edict_t *ent)
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_unknown_team", t);
 		return;
 	}
-
 	if (ent->client->resp.ctf_team == desired_team)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_already_on_team",
-				   CTFTeamName(ent->client->resp.ctf_team));
+			CTFTeamName(ent->client->resp.ctf_team));
 		return;
 	}
-
-	/* freeze */
-	if (ent->client->frozen && humanPlaying(ent)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "$g_cant_change_teams");
+	// Team switch cooldown
+// Team switch cooldown (applies even when coming from spectator)
+	if (ent->client->team_switch_time > level.time)
+	{
+		int secs = (int)((ent->client->team_switch_time - level.time).seconds()) + 1;
+		gi.LocClient_Print(ent, PRINT_HIGH, "Must wait {} seconds before switching teams.\n", secs);
 		return;
 	}
-	/* freeze */
-
+	// Check team unlock requirements (same logic as join menu)
+	if (desired_team == CTF_TEAM3 || desired_team == CTF_TEAM4)
+	{
+		uint32_t num1 = 0, num2 = 0, num3 = 0, num4 = 0;
+		for (uint32_t i = 1; i <= game.maxclients; i++)
+		{
+			edict_t* player = &g_edicts[i];
+			if (!player->inuse)
+				continue;
+			if (player->client->resp.ctf_team == CTF_TEAM1) num1++;
+			else if (player->client->resp.ctf_team == CTF_TEAM2) num2++;
+			else if (player->client->resp.ctf_team == CTF_TEAM3) num3++;
+			else if (player->client->resp.ctf_team == CTF_TEAM4) num4++;
+		}
+		bool green_unlocked = (num1 >= 5 && num2 >= 5) || (num3 > 0);
+		bool yellow_unlocked = ((green_unlocked && num3 >= 5) || (num4 > 0));
+		// Admin/match override
+		if (ctfgame.match >= MATCH_PREGAME) {
+			green_unlocked = true;
+			yellow_unlocked = true;
+		}
+		if (desired_team == CTF_TEAM3 && !green_unlocked)
+		{
+			gi.LocClient_Print(ent, PRINT_HIGH, "Green team is locked. More players needed.\n");
+			return;
+		}
+		if (desired_team == CTF_TEAM4 && !yellow_unlocked)
+		{
+			gi.LocClient_Print(ent, PRINT_HIGH, "Yellow team is locked. More players needed.\n");
+			return;
+		}
+	}
+	if (ent->client->thirdperson)
+	{
+		RemoveThirdPersonGhost(ent);
+		ent->client->thirdperson = false;
+		ent->client->chase_target = nullptr;
+		ent->client->ps.stats[STAT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FT_VIEWED] = 0;
+	}
 	////
 	ent->svflags = SVF_NONE;
 	ent->flags &= ~FL_GODMODE;
@@ -1537,33 +1588,27 @@ void CTFTeam_f(edict_t *ent)
 	char value[MAX_INFO_VALUE] = { 0 };
 	gi.Info_ValueForKey(ent->client->pers.userinfo, "skin", value, sizeof(value));
 	CTFAssignSkin(ent, value);
-
 	// if anybody has a menu open, update it immediately
 	CTFDirtyTeamMenu();
-
 	if (ent->solid == SOLID_NOT)
 	{
 		// spectator
 		PutClientInServer(ent);
-
 		G_PostRespawn(ent);
-
 		gi.LocBroadcast_Print(PRINT_HIGH, "$g_joined_team",
-				   ent->client->pers.netname, CTFTeamName(desired_team));
+			ent->client->pers.netname, CTFTeamName(desired_team));
 		return;
 	}
-
-	ent->health = 0;
-	player_die(ent, ent, ent, 100000, vec3_origin, { MOD_SUICIDE, true });
-
-	// don't even bother waiting for death frames
+	// Suppress obituary by setting deadflag before player_die
 	ent->deadflag = true;
+	ent->health = 0;
+	ent->s.modelindex = 0;  // prevent body queue ghost
+	player_die(ent, ent, ent, 100000, vec3_origin, MOD_SUICIDE);
 	respawn(ent);
-
-	ent->client->resp.score = 0;
-
+	ent->client->resp.score--;  // manual -1 since obituary was suppressed
+	ent->client->team_switch_time = level.time + 60_sec;
 	gi.LocBroadcast_Print(PRINT_HIGH, "$g_changed_team",
-			   ent->client->pers.netname, CTFTeamName(desired_team));
+		ent->client->pers.netname, CTFTeamName(desired_team));
 }
 
 constexpr size_t MAX_CTF_STAT_LENGTH = 1024;
@@ -1628,8 +1673,18 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
 	{
 		/* freeze */
 		if (capturelimit->integer) {
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv -20 yv -10 loc_string2 1 $g_score_captures \"{}\" "), capturelimit->integer);
-		} else
+			int point_limit;
+
+			if (team_max_count >= 4)
+				point_limit = 15;
+			else if (team_max_count >= 3)
+				point_limit = 12;
+			else
+				point_limit = capturelimit->integer;
+
+			fmt::format_to(std::back_inserter(string), FMT_STRING("xv -20 yv -10 loc_string2 1 $g_score_captures \"{}\" "), point_limit);
+		}
+		else
 		/* freeze */
 		if (fraglimit->integer)
 		{
@@ -2705,17 +2760,70 @@ const pmenu_t nochasemenu[] = {
 	{ "$g_pc_return", PMENU_ALIGN_LEFT, CTFReturnToMain }
 };
 
-void CTFJoinTeam(edict_t *ent, ctfteam_t desired_team)
+void CTFJoinTeam(edict_t* ent, ctfteam_t desired_team)
 {
 	PMenu_Close(ent);
-
+	// Can't switch while frozen
+	if (ent->client->frozen)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Can't change teams while frozen.\n");
+		return;
+	}
+	// Already on this team
+	if (ent->client->resp.ctf_team == desired_team)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "$g_already_on_team",
+			CTFTeamName(ent->client->resp.ctf_team));
+		return;
+	}
+	// Team switch cooldown (applies even when coming from spectator)
+	if (ent->client->team_switch_time > level.time)
+	{
+		int secs = (int)((ent->client->team_switch_time - level.time).seconds()) + 1;
+		gi.LocClient_Print(ent, PRINT_HIGH, "Must wait {} seconds before switching teams.\n", secs);
+		return;
+	}
+	// If already on a team and alive, treat as team switch (suicide penalty)
+	if (ent->client->resp.ctf_team != CTF_NOTEAM &&
+		ent->client->resp.ctf_team != desired_team &&
+		ent->solid != SOLID_NOT)
+	{
+		// Clean up third-person
+		if (ent->client->thirdperson)
+		{
+			RemoveThirdPersonGhost(ent);
+			ent->client->thirdperson = false;
+			ent->client->chase_target = nullptr;
+			ent->client->ps.stats[STAT_CHASE] = 0;
+			ent->client->ps.stats[STAT_FT_CHASE] = 0;
+			ent->client->ps.stats[STAT_FT_VIEWED] = 0;
+		}
+		ent->svflags = SVF_NONE;
+		ent->flags &= ~FL_GODMODE;
+		ent->client->resp.ctf_team = desired_team;
+		ent->client->resp.ctf_state = 0;
+		char value[MAX_INFO_VALUE] = { 0 };
+		gi.Info_ValueForKey(ent->client->pers.userinfo, "skin", value, sizeof(value));
+		CTFAssignSkin(ent, value);
+		CTFDirtyTeamMenu();
+		ent->deadflag = true;
+		ent->health = 0;
+		ent->s.modelindex = 0;  // prevent body queue ghost
+		player_die(ent, ent, ent, 100000, vec3_origin, MOD_SUICIDE);
+		respawn(ent);
+		ent->client->resp.score--;
+		ent->client->team_switch_time = level.time + 60_sec;
+		gi.LocBroadcast_Print(PRINT_HIGH, "$g_changed_team",
+			ent->client->pers.netname, CTFTeamName(desired_team));
+		return;
+	}
+	// First time joining or switching from spectator/noteam
 	ent->svflags &= ~SVF_NOCLIENT;
 	ent->client->resp.ctf_team = desired_team;
 	ent->client->resp.ctf_state = 0;
 	char value[MAX_INFO_VALUE] = { 0 };
 	gi.Info_ValueForKey(ent->client->pers.userinfo, "skin", value, sizeof(value));
 	CTFAssignSkin(ent, value);
-
 	// assign a ghost if we are in match mode
 	if (ctfgame.match == MATCH_GAME)
 	{
@@ -2724,20 +2832,14 @@ void CTFJoinTeam(edict_t *ent, ctfteam_t desired_team)
 		ent->client->resp.ghost = nullptr;
 		CTFAssignGhost(ent);
 	}
-
 	PutClientInServer(ent);
-
 	G_PostRespawn(ent);
-
 	gi.LocBroadcast_Print(PRINT_HIGH, "$g_joined_team",
-			   ent->client->pers.netname, CTFTeamName(desired_team));
-
+		ent->client->pers.netname, CTFTeamName(desired_team));
 	if (ctfgame.match == MATCH_SETUP)
 	{
 		gi.LocCenter_Print(ent, "Type \"ready\" in console to ready up.\n");
 	}
-
-	// if anybody has a menu open, update it immediately
 	CTFDirtyTeamMenu();
 }
 
@@ -2773,22 +2875,67 @@ void CTFChaseCam(edict_t* ent, pmenuhnd_t* p)
 {
 	edict_t* e;
 
-	CTFJoinTeam(ent, CTF_NOTEAM);
+	PMenu_Close(ent);
 
+	// If already chasing, stop chasing (return to free spectator)
 	if (ent->client->chase_target)
 	{
 		ent->client->chase_target = nullptr;
 		ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
-		PMenu_Close(ent);
 		return;
 	}
 
+	// If already a spectator, just find someone to chase
+	if (ent->client->resp.spectator)
+	{
+		for (uint32_t i = 1; i <= game.maxclients; i++)
+		{
+			e = g_edicts + i;
+			if (e->inuse && e->solid != SOLID_NOT)
+			{
+				ent->viewheight = 0;
+				ent->client->ps.pmove.viewheight = 0;
+				ent->client->ps.viewoffset = {};
+				ent->client->ps.pmove.origin = e->s.origin;
+				ent->s.origin = e->s.origin;
+
+				ent->client->chase_target = e;
+				ent->client->update_chase = true;
+				UpdateChaseCam(ent);
+				return;
+			}
+		}
+
+		PMenu_Open(ent, nochasemenu, -1, sizeof(nochasemenu) / sizeof(pmenu_t), nullptr, CTFNoChaseCamUpdate);
+		return;
+	}
+
+	// Switching from a team to spectator/chase
+	// Clean up third-person
+	if (ent->client->thirdperson)
+	{
+		RemoveThirdPersonGhost(ent);
+		ent->client->thirdperson = false;
+		ent->client->chase_target = nullptr;
+		ent->client->ps.stats[STAT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FT_VIEWED] = 0;
+	}
+
+	// Set spectator cooldown
+	ent->client->team_switch_time = level.time + 30_sec;
+
+	ent->client->resp.ctf_team = CTF_NOTEAM;
+	ent->client->resp.spectator = true;
+	ent->svflags &= ~SVF_NOCLIENT;
+	PutClientInServer(ent);
+
+	// Find someone to chase
 	for (uint32_t i = 1; i <= game.maxclients; i++)
 	{
 		e = g_edicts + i;
 		if (e->inuse && e->solid != SOLID_NOT)
 		{
-			// Clear stale view data before first chase
 			ent->viewheight = 0;
 			ent->client->ps.pmove.viewheight = 0;
 			ent->client->ps.viewoffset = {};
@@ -2796,14 +2943,12 @@ void CTFChaseCam(edict_t* ent, pmenuhnd_t* p)
 			ent->s.origin = e->s.origin;
 
 			ent->client->chase_target = e;
-			PMenu_Close(ent);
 			ent->client->update_chase = true;
-			UpdateChaseCam(ent);  // Call immediately to set up view correctly
+			UpdateChaseCam(ent);
 			return;
 		}
 	}
 
-	PMenu_Close(ent);
 	PMenu_Open(ent, nochasemenu, -1, sizeof(nochasemenu) / sizeof(pmenu_t), nullptr, CTFNoChaseCamUpdate);
 }
 
@@ -2839,7 +2984,7 @@ void CTFUpdateJoinMenu(edict_t* ent)
 	SetGameName(entries);
 
 	// ------------------------------------------------------------------------
-	// 1. COUNT PLAYERS (Moved up to determine unlock status)
+	// 1. COUNT PLAYERS (moved up to determine unlock status)
 	// ------------------------------------------------------------------------
 	uint32_t num1 = 0, num2 = 0, num3 = 0, num4 = 0;
 	for (uint32_t i = 0; i < game.maxclients; i++)
@@ -2855,13 +3000,10 @@ void CTFUpdateJoinMenu(edict_t* ent)
 	// ------------------------------------------------------------------------
 	// 2. DETERMINE UNLOCK STATUS
 	// ------------------------------------------------------------------------
-	// Green requires 5 Red AND 5 Blue
-	bool green_unlocked = (num1 >= 5 && num2 >= 5);
+	bool green_unlocked = (num1 >= 5 && num2 >= 5) || (num3 > 0);
+	bool yellow_unlocked = ((green_unlocked && num3 >= 5) || (num4 > 0));
 
-	// Yellow requires Green Unlocked AND 5 Green
-	bool yellow_unlocked = (green_unlocked && num3 >= 5);
-
-	// Admin/Match Override: If a match is starting or active, unlock everything
+	// admin/match override: if a match is starting or active, unlock everything
 	if (ctfgame.match >= MATCH_PREGAME) {
 		green_unlocked = true;
 		yellow_unlocked = true;
@@ -2872,7 +3014,7 @@ void CTFUpdateJoinMenu(edict_t* ent)
 	// ------------------------------------------------------------------------
 	if (ctfgame.match >= MATCH_PREGAME && matchlock->integer)
 	{
-		// Match Locked: Disable all join entries
+		// match locked: disable all join entries
 		Q_strlcpy(entries[jmenu_red].text, "MATCH IS LOCKED", sizeof(entries[jmenu_red].text));
 		entries[jmenu_red].SelectFunc = nullptr;
 
@@ -2887,7 +3029,7 @@ void CTFUpdateJoinMenu(edict_t* ent)
 	}
 	else
 	{
-		// --- RED & BLUE (Always Open) ---
+		// Red & Blue (always open)
 		if (ctfgame.match >= MATCH_PREGAME)
 		{
 			Q_strlcpy(entries[jmenu_red].text, "Join Red MATCH Team", sizeof(entries[jmenu_red].text));
@@ -2901,7 +3043,7 @@ void CTFUpdateJoinMenu(edict_t* ent)
 		entries[jmenu_red].SelectFunc = CTFJoinTeam1;
 		entries[jmenu_blue].SelectFunc = CTFJoinTeam2;
 
-		// --- GREEN (Conditional) ---
+		// Green (conditional)
 		if (green_unlocked)
 		{
 			if (ctfgame.match >= MATCH_PREGAME)
@@ -2917,7 +3059,7 @@ void CTFUpdateJoinMenu(edict_t* ent)
 			entries[jmenu_green].SelectFunc = nullptr;
 		}
 
-		// --- YELLOW (Conditional) ---
+		// Yellow (conditional)
 		if (yellow_unlocked)
 		{
 			if (ctfgame.match >= MATCH_PREGAME)
@@ -2939,7 +3081,7 @@ void CTFUpdateJoinMenu(edict_t* ent)
 	// ------------------------------------------------------------------------
 	if (g_teamplay_force_join->string && *g_teamplay_force_join->string)
 	{
-		// Helper lambda to clear an entry
+		// helper lambda to clear an entry
 		auto ClearEntry = [&](int index) {
 			entries[index].text[0] = '\0';
 			entries[index].SelectFunc = nullptr;
@@ -3052,25 +3194,25 @@ void CTFOpenJoinMenu(edict_t* ent)
 		else if (game.clients[i].resp.ctf_team == CTF_TEAM4) num4++;
 	}
 
-	// 2. Determine Validity (Unlock Status)
-	// Green requires 5 Red AND 5 Blue
-	bool green_valid = (num1 >= 5 && num2 >= 5);
+	// 2. determine validity (unlock status)
+	// green requires 5 red, 5 blue
+	bool green_valid = (num1 >= 5 && num2 >= 5) || (num3 > 0);
 
-	// Yellow requires Green Unlocked AND 5 Green
-	bool yellow_valid = (green_valid && num3 >= 5);
+	// yellow requires green unlocked & 5 green
+	bool yellow_valid = ((green_valid && num3 >= 5) || (num4 > 0));
 
-	// Override: If a match is starting/active, all teams are valid targets
+	// override: if a match is starting/active, all teams are valid targets
 	if (ctfgame.match >= MATCH_PREGAME) {
 		green_valid = true;
 		yellow_valid = true;
 	}
 
 	// 3. Auto-balance cursor position
-	// Start by assuming Red is the target
+	// start by assuming red is target
 	int team = CTF_TEAM1;
 	uint32_t min_players = num1;
 
-	// Check Blue (Always valid)
+	// check blue (always valid)
 	if (num2 < min_players) {
 		min_players = num2;
 		team = CTF_TEAM2;
@@ -3079,7 +3221,7 @@ void CTFOpenJoinMenu(edict_t* ent)
 		if (brandom()) team = CTF_TEAM2;
 	}
 
-	// Check Green (Only if unlocked)
+	// check green (only if unlocked)
 	if (green_valid) {
 		if (num3 < min_players) {
 			min_players = num3;
@@ -3090,7 +3232,7 @@ void CTFOpenJoinMenu(edict_t* ent)
 		}
 	}
 
-	// Check Yellow (Only if unlocked)
+	// check yellow (only if unlocked)
 	if (yellow_valid) {
 		if (num4 < min_players) {
 			min_players = num4;
@@ -3136,7 +3278,7 @@ void CTFObserver(edict_t *ent)
 		return;
 
 	/* freeze */
-	if (ent->client->frozen && humanPlaying(ent)) {
+	if (ent->client->frozen) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_cant_change_teams");
 		return;
 	}
@@ -4002,10 +4144,5 @@ void CTFBoot(edict_t *ent)
 
 void CTFSetPowerUpEffect(edict_t *ent, effects_t def)
 {
-	if (ent->client->resp.ctf_team == CTF_TEAM1 && def == EF_QUAD)
-		ent->s.effects |= EF_PENT; // red
-	else if (ent->client->resp.ctf_team == CTF_TEAM2 && def == EF_PENT)
-		ent->s.effects |= EF_QUAD; // blue
-	else
-		ent->s.effects |= def;
+	ent->s.effects |= def;
 }

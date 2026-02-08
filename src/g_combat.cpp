@@ -564,7 +564,11 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 				damage = 0;
 		}
 	}
-
+	// Spawn protection
+	if (targ->client && targ->client->spawn_protection_time > level.time && attacker != targ)
+	{
+		return;
+	}
 	// ROGUE
 	//  allow the deathmatch game to change values
 	if (deathmatch->integer && gamerules->integer)

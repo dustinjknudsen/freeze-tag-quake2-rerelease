@@ -282,6 +282,9 @@ void BotStopMovement(edict_t* bot)
 
 void freezeBotHook()
 {
+	if (level.intermissiontime)
+		return;
+
 	edict_t* bot;
 
 	for (uint32_t i = 0; i < game.maxclients; i++)
@@ -340,6 +343,13 @@ void freezeBotHook()
 			// No rescue target - reset state but preserve cooldown
 			if (bot->client->hook_rescue_state != RESCUE_NONE)
 				bot->client->hook_rescue_state = RESCUE_NONE;
+			continue;
+		}
+
+		// Check if frozen ally is already being thawed
+		if (frozen_ally->client->resp.thawer)
+		{
+			bot->client->hook_rescue_state = RESCUE_NONE;
 			continue;
 		}
 
@@ -477,8 +487,7 @@ void freezeBotHook()
 
 				if (hooked_ally)
 				{
-					// --- MODIFIED LOGIC START ---
-					// 50% chance to Drag (Retreat), 50% chance to just Reel
+					// 50% chance to retreat, 50% chance to reel
 					if (rand() % 2 == 0)
 					{
 						bot->client->hook_rescue_state = RESCUE_RETREATING;
@@ -491,7 +500,6 @@ void freezeBotHook()
 						// Standard reel time
 						//bot->client->hook_rescue_time = level.time + 5_sec; 
 					}
-					// --- MODIFIED LOGIC END ---
 				}
 				else
 				{
@@ -747,6 +755,16 @@ bool freezeCheck(edict_t* ent, mod_t mod)
 
 void freezeAnim(edict_t* ent)
 {
+	// Clean up third-person ghost if player was in third-person mode
+	if (ent->client->thirdperson)
+	{
+		RemoveThirdPersonGhost(ent);
+		ent->client->thirdperson = false;
+		ent->client->ps.stats[STAT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FT_VIEWED] = 0;
+	}
+
 	ent->client->anim_priority = ANIM_DEATH;
 	if (ent->client->ps.pmove.pm_flags & PMF_DUCKED)
 	{
@@ -805,6 +823,7 @@ void freezeAnim(edict_t* ent)
 	else
 		gi.sound(ent, CHAN_BODY, gi.soundindex("boss3/d_hit.wav"), 1, ATTN_NORM, 0);
 	ent->client->frozen = true;
+	//ent->client->resp.deaths++;
 	ent->client->frozen_time = level.time + gtime_t::from_sec(frozen_time->value);
 	ent->client->resp.thawer = nullptr;
 	ent->client->bot_helper = nullptr;
@@ -929,7 +948,388 @@ void playerBotHelper(edict_t* ent) {
 	}
 }
 
+// Bot team management
+ctfteam_t bot_pending_team = CTF_NOTEAM;
+int bot_pending_count = 0;
+
+void Cmd_BotAddTeam_f()
+{
+	if (gi.argc() < 3) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Usage: sv bot_add <team> <count>\n");
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "  team: red, blue, green, yellow\n");
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "  count: number of bots to add\n");
+		return;
+	}
+
+	const char* t = gi.argv(2);
+	ctfteam_t team;
+
+	if (Q_strcasecmp(t, "red") == 0)
+		team = CTF_TEAM1;
+	else if (Q_strcasecmp(t, "blue") == 0)
+		team = CTF_TEAM2;
+	else if (Q_strcasecmp(t, "green") == 0)
+		team = CTF_TEAM3;
+	else if (Q_strcasecmp(t, "yellow") == 0)
+		team = CTF_TEAM4;
+	else {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Unknown team: {}. Use red, blue, green, yellow.\n", t);
+		return;
+	}
+
+	if (gi.argc() < 4) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Please specify a number of bots to add.\n");
+		return;
+	}
+
+	int count = atoi(gi.argv(3));
+	if (count < 1) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Count must be at least 1.\n");
+		return;
+	}
+
+	// Check available slots
+	int used = 0;
+	for (uint32_t i = 1; i <= game.maxclients; i++)
+		if (g_edicts[i].inuse)
+			used++;
+
+	int available = game.maxclients - used;
+	if (count > available) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Only {} slots available (requested {}).\n", available, count);
+		count = available;
+	}
+
+	if (count <= 0) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "No available client slots.\n");
+		return;
+	}
+
+	// Set pending team so CTFAssignTeam picks it up
+	bot_pending_team = team;
+	bot_pending_count = count;
+
+	// Use engine's addbot command for each bot
+	for (int i = 0; i < count; i++)
+		gi.AddCommandString("addbot\n");
+
+	gi.LocClient_Print(nullptr, PRINT_HIGH, "Adding {} bot(s) to {} team.\n", count, CTFTeamName(team));
+}
+
+void freezeBotDrown()
+{
+	if (level.intermissiontime)
+		return;
+
+	for (uint32_t i = 0; i < game.maxclients; i++)
+	{
+		edict_t* bot = g_edicts + 1 + i;
+		if (!bot->inuse)
+			continue;
+		if (!(bot->svflags & SVF_BOT))
+			continue;
+		if (bot->client->resp.spectator)
+			continue;
+		if (bot->health <= 0)
+			continue;
+		if (bot->client->frozen)
+			continue;
+		if (bot->waterlevel < WATER_UNDER)
+			continue;
+
+		// Bot is fully submerged — check if running low on air
+		gtime_t air_left = bot->air_finished - level.time;
+
+		if (air_left > 3_sec)
+			continue; // Still have plenty of air
+
+		// Urgent: try to hook out of water
+		if (air_left < 2_sec && !(bot->client->hookstate & hook_on))
+		{
+			// Look straight up and fire hook
+			bot->client->v_angle[PITCH] = -80;
+			bot->client->ps.viewangles[PITCH] = -80;
+			bot->s.angles[PITCH] = 0;
+
+			// Trace upward to find a ceiling/surface to hook
+			vec3_t start, end;
+			start = bot->s.origin;
+			start[2] += bot->viewheight;
+			end = start;
+			end[2] += hook_max_len->value * 0.7f;
+
+			trace_t trace = gi.traceline(start, end, bot, MASK_SOLID);
+			if (trace.fraction < 1.0f)
+			{
+				// Found something to hook — fire!
+				bot->client->hookstate = hook_on;
+				firehook(bot);
+			}
+		}
+
+		// If hooked, reel in
+		if (bot->client->hookstate & hook_in)
+		{
+			bot->client->hookstate |= shrink_on;
+			bot->client->hookstate &= ~grow_on;
+
+			// If we surfaced, release hook
+			if (bot->waterlevel < WATER_UNDER)
+			{
+				bot->client->hookstate = 0;
+			}
+		}
+
+		// Always try to swim upward when low on air
+		if (air_left < 3_sec)
+		{
+			// Find a point above us
+			vec3_t escape_point;
+			escape_point = bot->s.origin;
+			escape_point[2] += 256;
+
+			gi.Bot_MoveToPoint(bot, escape_point, 0);
+
+			// Add upward velocity to help swim
+			if (bot->velocity[2] < 200)
+				bot->velocity[2] += 50;
+		}
+	}
+}
+
+void Cmd_BotKickTeam_f()
+{
+	if (gi.argc() < 3) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Usage: sv bot_kick <team> [count]\n");
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "  team: red, blue, green, yellow, all\n");
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "  count: number to kick (default 1, 0 = all on team)\n");
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "  'sv bot_kick all' kicks all bots\n");
+		return;
+	}
+	const char* t = gi.argv(2);
+	ctfteam_t team = CTF_NOTEAM;
+	bool kick_all_teams = false;
+	if (Q_strcasecmp(t, "red") == 0)
+		team = CTF_TEAM1;
+	else if (Q_strcasecmp(t, "blue") == 0)
+		team = CTF_TEAM2;
+	else if (Q_strcasecmp(t, "green") == 0)
+		team = CTF_TEAM3;
+	else if (Q_strcasecmp(t, "yellow") == 0)
+		team = CTF_TEAM4;
+	else if (Q_strcasecmp(t, "all") == 0)
+		kick_all_teams = true;
+	else {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Unknown team: {}. Use red, blue, green, yellow, all.\n", t);
+		return;
+	}
+
+	int count = 1;
+	bool kick_all_on_team = false;
+
+	if (gi.argc() >= 4)
+	{
+		count = atoi(gi.argv(3));
+		if (count == 0)
+			kick_all_on_team = true;
+	}
+	else if (kick_all_teams)
+	{
+		// "sv bot_kick all" with no count = kick all bots
+		kick_all_on_team = true;
+	}
+
+	// Build list of bot indices to kick (reverse order to avoid index shifting issues)
+	int kicked = 0;
+	for (int i = game.maxclients; i >= 1; i--)
+	{
+		edict_t* ent = &g_edicts[i];
+		if (!ent->inuse)
+			continue;
+		if (!ent->client)
+			continue;
+		if (!(ent->svflags & SVF_BOT))
+			continue;
+		if (!kick_all_teams && ent->client->resp.ctf_team != team)
+			continue;
+		if (!kick_all_on_team && kicked >= count)
+			break;
+		// Clean up freeze tag state
+		if (ent->client->frozen) {
+			RemoveFrozenBodyGhost(ent);
+			ent->client->frozen = false;
+			freeze[get_team_int(ent->client->resp.ctf_team)].update = true;
+		}
+		if (ent->client->thirdperson) {
+			RemoveThirdPersonGhost(ent);
+			ent->client->thirdperson = false;
+		}
+		if (ent->client->bot_helper) {
+			ent->client->bot_helper->client->bot_helper = nullptr;
+			ent->client->bot_helper = nullptr;
+		}
+		// Kick by client number (i - 1 is the client index)
+		gi.AddCommandString(G_Fmt("kick {}\n", i - 1).data());
+		kicked++;
+	}
+	if (kicked == 0)
+	{
+		if (kick_all_teams)
+			gi.LocClient_Print(nullptr, PRINT_HIGH, "No bots found.\n");
+		else
+			gi.LocClient_Print(nullptr, PRINT_HIGH, "No bots found on {} team.\n", CTFTeamName(team));
+	}
+	else
+	{
+		if (kick_all_teams)
+			gi.LocClient_Print(nullptr, PRINT_HIGH, "Kicked {} bot(s) from all teams. Wait before adding new bots.\n", kicked);
+		else
+			gi.LocClient_Print(nullptr, PRINT_HIGH, "Kicked {} bot(s) from {} team. Wait before adding new bots.\n", kicked, CTFTeamName(team));
+	}
+}
+
+void freezeBotHookTaxi()
+{
+	if (level.intermissiontime)
+		return;
+
+	for (uint32_t i = 0; i < game.maxclients; i++)
+	{
+		edict_t* bot = g_edicts + 1 + i;
+		if (!bot->inuse)
+			continue;
+		if (!(bot->svflags & SVF_BOT))
+			continue;
+		if (bot->client->resp.spectator)
+			continue;
+		if (bot->health <= 0)
+			continue;
+		if (bot->client->frozen)
+			continue;
+
+		// Skip if bot is already in a hook rescue sequence
+		if (bot->client->hook_rescue_state != RESCUE_NONE)
+			continue;
+
+		// Skip if hook is already in use
+		if (bot->client->hookstate & hook_on)
+			continue;
+
+		// Skip if on hook cooldown
+		if (bot->client->hook_rescue_time > level.time)
+			continue;
+
+		// Find any frozen teammate nearby (not just assigned helper)
+		edict_t* best_frozen = nullptr;
+		float best_dist = 999999;
+
+		for (uint32_t j = 0; j < game.maxclients; j++)
+		{
+			edict_t* other = g_edicts + 1 + j;
+			if (!other->inuse)
+				continue;
+			if (!other->client->frozen)
+				continue;
+			if (other->client->resp.ctf_team != bot->client->resp.ctf_team)
+				continue;
+
+			// Already being thawed by someone
+			if (other->client->resp.thawer)
+				continue;
+
+			// Already being hooked by someone else
+			bool already_hooked = false;
+			for (uint32_t k = 0; k < game.maxclients; k++)
+			{
+				edict_t* hooker = g_edicts + 1 + k;
+				if (!hooker->inuse || hooker == bot)
+					continue;
+				if ((hooker->client->hookstate & hook_on) && hooker->client->bot_helper == other)
+				{
+					already_hooked = true;
+					break;
+				}
+			}
+			if (already_hooked)
+				continue;
+
+			float dist = (bot->s.origin - other->s.origin).length();
+
+			// Sweet spot: close enough to hook accurately while running
+			// but not so close that walking would be faster
+			if (dist < 150 || dist > hook_max_len->value * 0.6f)
+				continue;
+
+			if (dist < best_dist)
+			{
+				best_dist = dist;
+				best_frozen = other;
+			}
+		}
+
+		if (!best_frozen)
+			continue;
+
+		// Check line of sight
+		if (!BotCanHookTarget(bot, best_frozen))
+			continue;
+
+		// Check bot is actually moving (not camping)
+		float speed = bot->velocity.length();
+		if (speed < 100)
+			continue;
+
+		// Fire hook at frozen teammate without stopping!
+		vec3_t aim_angles;
+		BotCalculateHookAim(bot, best_frozen, aim_angles);
+		bot->client->v_angle = aim_angles;
+		bot->client->ps.viewangles = aim_angles;
+		bot->s.angles[YAW] = aim_angles[YAW];
+		bot->s.angles[PITCH] = 0;
+
+		bot->client->hookstate = hook_on;
+		firehook(bot);
+
+		// Set a short timer to auto-release
+		bot->client->hook_rescue_time = level.time + 3_sec;
+		bot->client->hook_taxi_time = level.time + 3_sec;
+	}
+
+	// Handle active taxi hooks — reel in while keeping momentum
+	for (uint32_t i = 0; i < game.maxclients; i++)
+	{
+		edict_t* bot = g_edicts + 1 + i;
+		if (!bot->inuse)
+			continue;
+		if (!(bot->svflags & SVF_BOT))
+			continue;
+		if (bot->client->hook_taxi_time == 0_ms)
+			continue;
+
+		// Taxi expired or hook dropped
+		if (level.time > bot->client->hook_taxi_time || !(bot->client->hookstate & hook_on))
+		{
+			if (bot->client->hookstate & hook_on)
+				bot->client->hookstate = 0;
+			bot->client->hook_taxi_time = 0_ms;
+			bot->client->hook_rescue_time = level.time + 3_sec; // Cooldown
+			continue;
+		}
+
+		// Hook connected — reel in the frozen body while bot keeps moving
+		if (bot->client->hookstate & hook_in)
+		{
+			bot->client->hookstate |= shrink_on;
+			bot->client->hookstate &= ~grow_on;
+		}
+	}
+}
+
 void freezeBotHelper() {
+
+	if (level.intermissiontime)
+		return;
+
 	edict_t* ent;
 	for (uint32_t i = 0; i < game.maxclients; i++) {
 		ent = g_edicts + 1 + i;
@@ -939,11 +1339,35 @@ void freezeBotHelper() {
 			continue;
 		if (ent->client->frozen)
 			continue;
-		if (!ent->client->bot_helper || !ent->client->bot_helper->client->frozen)
-			continue;
 		if (!(ent->svflags & SVF_BOT))
 			continue;
+		if (!ent->client->bot_helper || !ent->client->bot_helper->client->frozen)
+		{
+			ent->client->bot_rescue_urgent = false;
+			continue;
+		}
+
+		// Move toward frozen teammate
 		gi.Bot_MoveToPoint(ent, ent->client->bot_helper->s.origin, 0);
+
+		// Urgent rescue: suppress combat behavior
+		if (ent->client->bot_rescue_urgent)
+		{
+			// Clear enemy so bot doesn't stop to fight
+			ent->enemy = nullptr;
+			ent->oldenemy = nullptr;
+
+			// Don't fire weapons - keep moving
+			ent->client->buttons &= ~BUTTON_ATTACK;
+			ent->client->latched_buttons &= ~BUTTON_ATTACK;
+
+			// Check if rescue complete
+			float dist = (ent->s.origin - ent->client->bot_helper->s.origin).length();
+			if (dist <= MELEE_DISTANCE + 16)
+			{
+				ent->client->bot_rescue_urgent = false;
+			}
+		}
 	}
 }
 
@@ -952,7 +1376,6 @@ void playerThaw(edict_t* ent)
 	edict_t* other;
 	int	j;
 	vec3_t	eorg;
-
 	for (uint32_t i = 0; i < game.maxclients; i++)
 	{
 		other = g_edicts + 1 + i;
@@ -983,7 +1406,25 @@ void playerThaw(edict_t* ent)
 			ent->client->thaw_time = level.time + 3_sec;
 			gi.sound(ent, CHAN_BODY, gi.soundindex("world/steam3.wav"), 1, ATTN_NORM, 0);
 		}
+		// Stop bot movement and crouch while thawing
+		if (other->svflags & SVF_BOT)
+		{
+			other->velocity[0] = 0;
+			other->velocity[1] = 0;
+			other->client->ps.pmove.pm_flags |= PMF_DUCKED;
+			other->mins[2] = -24;
+			other->maxs[2] = 4;
+			other->viewheight = -2;
+		}
 		return;
+	}
+	// Uncrouch bot if it was thawing and left range
+	if (ent->client->resp.thawer && (ent->client->resp.thawer->svflags & SVF_BOT))
+	{
+		ent->client->resp.thawer->client->ps.pmove.pm_flags &= ~PMF_DUCKED;
+		ent->client->resp.thawer->mins[2] = -24;
+		ent->client->resp.thawer->maxs[2] = 32;
+		ent->client->resp.thawer->viewheight = 22;
 	}
 	ent->client->resp.thawer = nullptr;
 	ent->client->thaw_time = HOLD_FOREVER;
@@ -992,7 +1433,6 @@ void playerThaw(edict_t* ent)
 void playerBreak(edict_t* ent, int force)
 {
 	int	n;
-
 	ent->client->respawn_time = level.time + 1_sec;
 	if (ent->waterlevel == 3)
 		gi.sound(ent, CHAN_BODY, gi.soundindex("misc/fhit3.wav"), 1, ATTN_NORM, 0);
@@ -1028,15 +1468,33 @@ void playerBreak(edict_t* ent, int force)
 	ent->client->frozen = false;
 	freeze[get_team_int(ent->client->resp.ctf_team)].update = true;
 	ent->client->ps.stats[STAT_CHASE] = 0;
-
+	ent->client->ps.stats[STAT_FT_CHASE] = 0;
+	ent->client->ps.stats[STAT_FT_VIEWED] = 0;
 	// Clean up ghost entity and restore visibility
 	RemoveFrozenBodyGhost(ent);
+	RemoveThirdPersonGhost(ent);
+	ent->client->thirdperson = false;
 	ent->svflags &= ~SVF_NOCLIENT;
-
-	if (ent->client->bot_helper) {
-		ent->client->bot_helper->client->bot_helper = nullptr;
-		ent->client->bot_helper = nullptr;
+	// Clear ALL bot helpers pointing at this player and uncrouch bots
+	for (uint32_t i = 1; i <= game.maxclients; i++)
+	{
+		edict_t* other = &g_edicts[i];
+		if (!other->inuse)
+			continue;
+		if (other->client->bot_helper == ent)
+		{
+			// Uncrouch bot if it was thawing
+			if (other->svflags & SVF_BOT)
+			{
+				other->client->ps.pmove.pm_flags &= ~PMF_DUCKED;
+				other->mins[2] = -24;
+				other->maxs[2] = 32;
+				other->viewheight = 22;
+			}
+			other->client->bot_helper = nullptr;
+		}
 	}
+	ent->client->bot_helper = nullptr;
 }
 
 void playerUnfreeze(edict_t* ent)
@@ -1131,13 +1589,11 @@ void freezeIntermission(void)
 {
 	int	i, j, k;
 	int	team;
-
 	i = j = k = 0;
 	// Check scores (Loop 4 times)
 	for (i = 0; i < 4; i++)
 		if (get_team_score(i) > j)
 			j = get_team_score(i);
-
 	// Find winners (Loop 4 times)
 	for (i = 0; i < 4; i++)
 		if (get_team_score(i) == j)
@@ -1145,7 +1601,6 @@ void freezeIntermission(void)
 			k++;
 			team = i;
 		}
-
 	if (k > 1)
 	{
 		i = j = k = 0;
@@ -1153,7 +1608,6 @@ void freezeIntermission(void)
 		for (i = 0; i < 4; i++)
 			if (freeze[i].thawed > j)
 				j = freeze[i].thawed;
-
 		for (i = 0; i < 4; i++)
 			if (freeze[i].thawed == j)
 			{
@@ -1163,9 +1617,11 @@ void freezeIntermission(void)
 	}
 	if (k != 1)
 	{
+		gi.LocBroadcast_Print(PRINT_CENTER, "Stalemate!\n");
 		gi.LocBroadcast_Print(PRINT_HIGH, "Stalemate!\n");
 		return;
 	}
+	gi.LocBroadcast_Print(PRINT_CENTER, "{} TEAM IS THE WINNER!\n", freeze_team[team]);
 	gi.LocBroadcast_Print(PRINT_HIGH, "{} TEAM IS THE WINNER!\n", freeze_team[team]);
 }
 
@@ -1220,10 +1676,9 @@ void breakTeam(int team)
 void updateTeam(int team)
 {
 	edict_t* ent;
-	int	frozen, alive;
+	int	frozen, alive, total_players;
 	int	play_sound = 0;
-
-	frozen = alive = 0;
+	frozen = alive = total_players = 0;
 	for (uint32_t i = 0; i < game.maxclients; i++)
 	{
 		ent = g_edicts + 1 + i;
@@ -1233,6 +1688,7 @@ void updateTeam(int team)
 			continue;
 		if (ent->client->resp.ctf_team != get_team_enum(team))
 			continue;
+		total_players++;
 		if (ent->client->frozen)
 			frozen++;
 		if (ent->health > 0)
@@ -1240,8 +1696,34 @@ void updateTeam(int team)
 	}
 	freeze[team].frozen = frozen;
 	freeze[team].alive = alive;
-
-	if (frozen && !alive)
+	// Team remaining count for all players on this team
+	for (uint32_t i = 0; i < game.maxclients; i++)
+	{
+		ent = g_edicts + 1 + i;
+		if (!ent->inuse)
+			continue;
+		if (ent->client->resp.spectator)
+			continue;
+		if (ent->client->resp.ctf_team != get_team_enum(team))
+			continue;
+		int cs_index = CONFIG_CTF_PLAYER_NAME + 50 + team;
+		gi.configstring(cs_index, G_Fmt("Team Remaining: {}", alive).data());
+		ent->client->ps.stats[STAT_LAST_ALIVE] = cs_index;
+		// Sound warning when last alive
+		if (alive == 1 && frozen > 0 && !ent->client->frozen && ent->health > 0)
+		{
+			if (ent->client->last_alive_warn_time == 0_ms)
+			{
+				ent->client->last_alive_warn_time = level.time;
+				//gi.sound(ent, CHAN_AUTO, gi.soundindex("misc/talk1.wav"), 1, ATTN_NORM, 0);
+			}
+		}
+		else
+		{
+			ent->client->last_alive_warn_time = 0_ms;
+		}
+	}
+	if (total_players > 0 && !alive)
 	{
 		// Loop 4 times to award points to all surviving teams
 		for (int i = 0; i < 4; i++)
@@ -1254,7 +1736,6 @@ void updateTeam(int team)
 			}
 		}
 		breakTeam(team);
-
 		if (play_sound <= 1)
 			gi.positioned_sound(vec3_origin, world, CHAN_VOICE | CHAN_RELIABLE, gi.soundindex("world/xian1.wav"), 1, ATTN_NONE, 0);
 	}
@@ -1286,11 +1767,10 @@ bool endCheck()
 	}
 
 	// Determine how many teams are active
+// Determine how many teams are active (have players)
 	if (total[3] > 0)
 		team_max_count = 4;
 	else if (total[2] > 0)
-		team_max_count = 3;
-	else if (total[0] >= 5 && total[1] >= 5)
 		team_max_count = 3;
 	else
 		team_max_count = 2;
@@ -1314,7 +1794,7 @@ bool endCheck()
 		else if (team_max_count >= 3)
 			point_limit = 12;
 		else
-			point_limit = (int)capturelimit->value;  // Default (e.g., 8)
+			point_limit = (int)capturelimit->value;  // Default 
 
 		for (i = 0; i < 4; i++)
 			if (get_team_score(i) >= point_limit)
@@ -1371,6 +1851,12 @@ void playerShell(edict_t* ent, ctfteam_t team)
 		ent->s.renderfx |= RF_SHELL_RED | RF_SHELL_GREEN;
 }
 
+bool powerupBlinkVisible()
+{
+	// 100ms on, 100ms off
+	return ((level.time.milliseconds() / 100) % 3) == 0;
+}
+
 void freezeEffects(edict_t* ent)
 {
 	if (level.intermissiontime)
@@ -1407,37 +1893,23 @@ void FreezeScoreboardMessage(edict_t* ent, edict_t* killer)
 		gclient_t* client = p_ent->client;
 
 		int team_id = 0;
-		if (client->resp.ctf_team == CTF_TEAM1)
-			team_id = 1;
-		else if (client->resp.ctf_team == CTF_TEAM2)
-			team_id = 2;
-		else if (client->resp.ctf_team == CTF_TEAM3) // Green
-			team_id = 3;
-		else if (client->resp.ctf_team == CTF_TEAM4) // Yellow
-			team_id = 4;
+		if (client->resp.ctf_team == CTF_TEAM1) team_id = 1;
+		else if (client->resp.ctf_team == CTF_TEAM2) team_id = 2;
+		else if (client->resp.ctf_team == CTF_TEAM3) team_id = 3;
+		else if (client->resp.ctf_team == CTF_TEAM4) team_id = 4;
 
-		// --- CALCULATION LOGIC ---
-		// Total Score is already (Frags + Thaws) because playerUnfreeze adds to score.
 		int total_score = client->resp.score;
 		int thaws = client->resp.thawed;
-
-		// Derive 'pure' frags by removing thaw points from the total
 		int frags = total_score - thaws;
-		// -------------------------
 
 		all_players.push_back({
-			(int)i,
-			team_id,
-			frags,        // Pass calculated frags, not total score
-			thaws,        // Pass actual thaw count
-			total_score,  // Pass total score (SCR)
-			client->ping,
+			(int)i, team_id, frags, thaws, total_score, client->ping,
 			client->frozen ? true : false,
 			client->resp.spectator ? true : false
 			});
 	}
 
-	// Sort by team, then score
+	// Sort players
 	std::sort(all_players.begin(), all_players.end(), [](const ScoreboardPlayer& a, const ScoreboardPlayer& b) {
 		int teamA = (a.team == 0) ? 99 : a.team;
 		int teamB = (b.team == 0) ? 99 : b.team;
@@ -1445,13 +1917,63 @@ void FreezeScoreboardMessage(edict_t* ent, edict_t* killer)
 		return a.score > b.score;
 		});
 
-	// Build string
+	// --- Determine Winning Team (Only during Intermission) ---
+	int winning_team = 0;
+	if (level.intermissiontime)
+	{
+		int max_score = -999999;
+		int count = (team_max_count < 2) ? 2 : team_max_count;
+
+		// Use actual team scores, same as freezeIntermission
+		for (int i = 0; i < count; i++) {
+			if (get_team_score(i) > max_score) {
+				max_score = get_team_score(i);
+				winning_team = i + 1; // team_totals is 1-indexed
+			}
+		}
+
+		// Check for ties
+		int tie_count = 0;
+		for (int i = 0; i < count; i++) {
+			if (get_team_score(i) == max_score) tie_count++;
+		}
+
+		// If tied, use thaw tiebreaker (same as freezeIntermission)
+		if (tie_count > 1)
+		{
+			winning_team = 0;
+			max_score = -1;
+			for (int i = 0; i < count; i++) {
+				if (freeze[i].thawed > max_score) {
+					max_score = freeze[i].thawed;
+					winning_team = i + 1;
+				}
+			}
+			// Check thaw ties too
+			tie_count = 0;
+			for (int i = 0; i < count; i++) {
+				if (freeze[i].thawed == max_score) tie_count++;
+			}
+			if (tie_count > 1) winning_team = 0;
+		}
+	}
+	// -----------------------------------------------------------
+
 	static std::string string;
 	string.clear();
 
 	// Header
 	if (capturelimit->integer) {
-		fmt::format_to(std::back_inserter(string), FMT_STRING("xl 3 yv -47 loc_string2 1 $g_score_captures \"{}\" "), capturelimit->integer);
+		int point_limit;
+
+		if (team_max_count >= 4)
+			point_limit = 15;
+		else if (team_max_count >= 3)
+			point_limit = 12;
+		else
+			point_limit = capturelimit->integer;
+
+		fmt::format_to(std::back_inserter(string), FMT_STRING("xl 3 yv -47 loc_string2 1 $g_score_captures \"{}\" "), point_limit);
 	}
 	if (timelimit->value) {
 		int frames_left = gi.ServerFrame() + ((gtime_t::from_min(timelimit->value) - level.time)).milliseconds() / gi.frame_time_ms;
@@ -1467,24 +1989,14 @@ void FreezeScoreboardMessage(edict_t* ent, edict_t* killer)
 
 	*/
 
-	// freeze_sb command
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xl 2 yv -40 freeze_sb {} "), all_players.size()); // adjust this to move scoreboard around
+	// "freeze_sb <num_players> <winning_team>"
+	fmt::format_to(std::back_inserter(string), FMT_STRING("xl 2 yv -40 freeze_sb {} {} "), all_players.size(), winning_team);
 
 	for (const auto& p : all_players) {
 		if (string.size() > 1300) break;
-
-		int team_id = p.team;
-		if (p.is_spectator) team_id = 0;
-
+		int team_id = p.is_spectator ? 0 : p.team;
 		fmt::format_to(std::back_inserter(string), FMT_STRING("{} {} {} {} {} {} {} "),
-			p.client_num,
-			p.score,
-			p.frags,
-			p.thaws,
-			p.ping,
-			p.is_frozen ? 1 : 0,
-			team_id
-		);
+			p.client_num, p.score, p.frags, p.thaws, p.ping, p.is_frozen ? 1 : 0, team_id);
 	}
 
 	gi.WriteByte(svc_layout);

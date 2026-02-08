@@ -22,6 +22,7 @@ void UpdateChaseCam(edict_t* ent)
             ent->client->thirdperson = false;
             ent->client->chase_target = nullptr;
             ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
+            RemoveThirdPersonGhost(ent);
             return;
         }
         targ = ent;
@@ -44,17 +45,8 @@ void UpdateChaseCam(edict_t* ent)
         targ = ent->client->chase_target;
     }
 
+    // === CAMERA POSITION CALCULATION (same for all chase modes) ===
     ownerv = targ->s.origin;
-
-    // On first chase frame, use target's origin as starting point
-    // (skip this check for self-chase since we're always at our own origin)
-    if (!selfChase)
-    {
-        vec3_t oldgoal = ent->s.origin;
-        if (oldgoal == vec3_origin || ent->client->update_chase)
-            oldgoal = targ->s.origin;
-    }
-
     ownerv[2] += targ->viewheight;
 
     angles = targ->client->v_angle;
@@ -100,43 +92,18 @@ void UpdateChaseCam(edict_t* ent)
     // === THIRD-PERSON SELF-CHASE MODE ===
     if (selfChase)
     {
-        // Custom camera positioning for third-person
-        vec3_t cam_offset;
-
-        angles = targ->client->v_angle;
-        if (angles[PITCH] > 56)
-            angles[PITCH] = 56;
-
-        AngleVectors(angles, forward, right, nullptr);
-
-        // Start at player origin + eye height
-        ownerv = targ->s.origin;
-        ownerv[2] += targ->viewheight - 8;  // Slightly lower than eye level
-
-        // Position camera behind player
-        o = ownerv + (forward * -50);  // 50 units behind (adjust to taste)
-
-        // Minimum height
-        if (o[2] < targ->s.origin[2] + 10)
-            o[2] = targ->s.origin[2] + 10;
-
-        // Trace to avoid going through walls
-        trace = gi.traceline(ownerv, o, targ, MASK_SOLID);
-        goal = trace.endpos;
-        goal += (forward * 2);
-
-        // Create ghost if it doesn't exist
+        // Create/update ghost so player can see themselves
         CreateThirdPersonGhost(ent);
-
-        // Update ghost visual state
         UpdateThirdPersonGhost(ent);
 
         // Calculate view offset from player origin to camera position
         ent->client->ps.viewoffset[0] = goal[0] - ent->s.origin[0];
         ent->client->ps.viewoffset[1] = goal[1] - ent->s.origin[1];
-        ent->client->ps.viewoffset[2] = goal[2] - ent->s.origin[2];
+        ent->client->ps.viewoffset[2] = goal[2] - ent->s.origin[2] - ent->viewheight;
 
-        // Disable prediction to prevent jitter
+        // Don't change pm_type - keep normal movement
+        // Don't change viewangles - let player control their own view
+
         ent->client->ps.pmove.pm_flags |= PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION;
 
         gi.linkentity(ent);
@@ -145,6 +112,8 @@ void UpdateChaseCam(edict_t* ent)
     // === END THIRD-PERSON MODE ===
 
     if (ent->client->frozen) {
+        // Reset any stale third-person viewoffset
+        ent->client->ps.viewoffset = {};
         // Create ghost if it doesn't exist
         CreateFrozenBodyGhost(ent);
 
@@ -197,88 +166,276 @@ void UpdateChaseCam(edict_t* ent)
     gi.linkentity(ent);
 }
 
-void ChaseNext(edict_t *ent)
+void ChaseNext(edict_t* ent)
 {
-	ptrdiff_t i;
-	edict_t	*e;
+    ent->client->auto_chase = false;
+    ptrdiff_t i;
+    edict_t* e;
+    // If alive and not frozen, don't allow chasing others
+    if (!ent->client->resp.spectator && !ent->client->frozen && ent->health > 0)
+        return;
+    if (!ent->client->chase_target)
+    {
+        // Clean up third-person if entering chase from frozen state
+        if (ent->client->frozen && ent->client->thirdperson)
+        {
+            RemoveThirdPersonGhost(ent);
+            ent->client->thirdperson = false;
+            ent->client->ps.viewoffset = {};
+            ent->client->ps.stats[STAT_FT_CHASE] = 0;
+            ent->client->ps.stats[STAT_FT_VIEWED] = 0;
+        }
+        ent->client->chase_target = ent;
+    }
+    i = ent->client->chase_target - g_edicts;
+    do
+    {
+        i++;
+        if (i > game.maxclients)
+            i = 1;
+        e = g_edicts + i;
+        if (!e->inuse)
+            continue;
+        // Spectators can chase anyone who isn't a spectator
+        if (ent->client->resp.spectator)
+        {
+            if (!e->client->resp.spectator)
+                break;
+            continue;
+        }
+        // Frozen players can only chase living teammates
+        if (ent->client->frozen)
+        {
+            if (e->client->resp.ctf_team != ent->client->resp.ctf_team)
+                continue;
+            if (e->client->frozen)
+                continue;
+            if (e->health > 0 && !e->client->resp.spectator)
+                break;
+        }
+    } while (e != ent->client->chase_target);
+    // If we looped back to ourselves, return to own frozen view
+    if (e == ent->client->chase_target && e == ent)
+    {
+        ent->client->chase_target = nullptr;
+        ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
+        ent->client->ps.viewoffset = {};
 
-	if (!ent->client->chase_target)
-		/* freeze
-		return;
-		freeze */
-		ent->client->chase_target = ent;
-		/* freeze */
-
-	i = ent->client->chase_target - g_edicts;
-	do
-	{
-		i++;
-		if (i > game.maxclients)
-			i = 1;
-		e = g_edicts + i;
-		if (!e->inuse)
-			continue;
-		/* freeze */
-		if (!ent->client->resp.spectator && e->client->resp.ctf_team != ent->client->resp.ctf_team)
-			continue;
-		if (e->client->frozen && e != ent)
-			continue;
-		/* freeze */
-		if (!e->client->resp.spectator)
-			break;
-	} while (e != ent->client->chase_target);
-
-	/* freeze */
-	if (e == ent) {
-		ent->client->chase_target = nullptr;
-		ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
-	}
-	else
-	/* freeze */
-	ent->client->chase_target = e;
-	ent->client->update_chase = true;
+        if (ent->client->frozen)
+        {
+            RemoveFrozenBodyGhost(ent);
+            ent->svflags &= ~SVF_NOCLIENT;
+            ent->client->ps.pmove.pm_type = PM_DEAD;
+            ent->client->ps.pmove.origin = ent->s.origin;
+            ent->client->ps.viewangles[ROLL] = 40;
+            ent->client->ps.viewangles[PITCH] = -15;
+            ent->client->ps.viewangles[YAW] = ent->client->killer_yaw;
+            gi.linkentity(ent);
+        }
+    }
+    else
+    {
+        ent->client->chase_target = e;
+    }
+    ent->client->update_chase = true;
 }
 
-void ChasePrev(edict_t *ent)
+void ChasePrev(edict_t* ent)
 {
-	int		 i;
-	edict_t *e;
+    ent->client->auto_chase = false;
+    int i;
+    edict_t* e;
+    // If alive and not frozen, don't allow chasing others
+    if (!ent->client->resp.spectator && !ent->client->frozen && ent->health > 0)
+        return;
+    if (!ent->client->chase_target)
+    {
+        // Clean up third-person if entering chase from frozen state
+        if (ent->client->frozen && ent->client->thirdperson)
+        {
+            RemoveThirdPersonGhost(ent);
+            ent->client->thirdperson = false;
+            ent->client->ps.viewoffset = {};
+            ent->client->ps.stats[STAT_FT_CHASE] = 0;
+            ent->client->ps.stats[STAT_FT_VIEWED] = 0;
+        }
+        ent->client->chase_target = ent;
+    }
+    i = ent->client->chase_target - g_edicts;
+    do
+    {
+        i--;
+        if (i < 1)
+            i = game.maxclients;
+        e = g_edicts + i;
+        if (!e->inuse)
+            continue;
+        // Spectators can chase anyone who isn't a spectator
+        if (ent->client->resp.spectator)
+        {
+            if (!e->client->resp.spectator)
+                break;
+            continue;
+        }
+        // Frozen players can only chase living teammates
+        if (ent->client->frozen)
+        {
+            if (e->client->resp.ctf_team != ent->client->resp.ctf_team)
+                continue;
+            if (e->client->frozen)
+                continue;
+            if (e->health > 0 && !e->client->resp.spectator)
+                break;
+        }
+    } while (e != ent->client->chase_target);
+    // If we looped back to ourselves, return to own frozen view
+    if (e == ent->client->chase_target && e == ent)
+    {
+        ent->client->chase_target = nullptr;
+        ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
+        ent->client->ps.viewoffset = {};
 
-	if (!ent->client->chase_target)
-		/* freeze
-		return;
-		freeze */
-		ent->client->chase_target = ent;
-		/* freeze */
+        if (ent->client->frozen)
+        {
+            RemoveFrozenBodyGhost(ent);
+            ent->svflags &= ~SVF_NOCLIENT;
+            ent->client->ps.pmove.pm_type = PM_DEAD;
+            ent->client->ps.pmove.origin = ent->s.origin;
+            ent->client->ps.viewangles[ROLL] = 40;
+            ent->client->ps.viewangles[PITCH] = -15;
+            ent->client->ps.viewangles[YAW] = ent->client->killer_yaw;
+            gi.linkentity(ent);
+        }
+    }
+    else
+    {
+        ent->client->chase_target = e;
+    }
+    ent->client->update_chase = true;
+}
 
-	i = ent->client->chase_target - g_edicts;
-	do
-	{
-		i--;
-		if (i < 1)
-			i = game.maxclients;
-		e = g_edicts + i;
-		if (!e->inuse)
-			continue;
-		/* freeze */
-		if (!ent->client->resp.spectator && e->client->resp.ctf_team != ent->client->resp.ctf_team)
-			continue;
-		if (e->client->frozen && e != ent)
-			continue;
-		/* freeze */
-		if (!e->client->resp.spectator)
-			break;
-	} while (e != ent->client->chase_target);
+void Cmd_AutoChase_f(edict_t* ent)
+{
+    if (!ent->client->resp.spectator)
+    {
+        gi.LocClient_Print(ent, PRINT_HIGH, "Must be a spectator to use auto-chase.\n");
+        return;
+    }
 
-	/* freeze */
-	if (e == ent) {
-		ent->client->chase_target = nullptr;
-		ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
-	}
-	else
-	/* freeze */
-	ent->client->chase_target = e;
-	ent->client->update_chase = true;
+    ent->client->auto_chase = !ent->client->auto_chase;
+
+    if (ent->client->auto_chase)
+    {
+        gi.LocClient_Print(ent, PRINT_HIGH, "Auto-chase enabled. Following top player.\n");
+    }
+    else
+    {
+        gi.LocClient_Print(ent, PRINT_HIGH, "Auto-chase disabled.\n");
+        ent->client->chase_target = nullptr;
+        ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
+    }
+}
+
+void UpdateAutoChase(edict_t* ent)
+{
+    if (!ent->client->auto_chase)
+        return;
+
+    // Ensure we are a spectator
+    if (!ent->client->resp.spectator)
+    {
+        ent->client->auto_chase = false;
+        return;
+    }
+
+    edict_t* best = nullptr;
+    float best_heuristic = -1;
+
+    // --- TUNING WEIGHTS ---
+    // FPM_WEIGHT: How much we care about speed/activity (Frags Per Minute)
+    // KD_WEIGHT:  How much we care about survival/skill (Kill/Death Ratio)
+    // currently set to favor fast active players (2.0) over campers (1.0)
+    const float FPM_WEIGHT = 2.0f;
+    const float KD_WEIGHT = 1.0f;
+
+    for (uint32_t i = 1; i <= game.maxclients; i++)
+    {
+        edict_t* other = &g_edicts[i];
+
+        if (!other->inuse) continue;
+        if (other->client->resp.spectator) continue;
+        if (other->client->resp.ctf_team == CTF_NOTEAM) continue;
+
+        // Skip players who are dead or frozen (optional: remove this if you want to watch dead bodies)
+        if (other->health <= 0 || other->client->frozen)
+            continue;
+
+        // 1. Calculate Score (Kills + Thaws)
+        // If you have a separate 'thaws' counter, add it: 
+        // float total_score = (float)other->client->resp.score + (float)other->client->resp.thaws;
+        float total_score = (float)other->client->resp.score;
+
+        // 2. Calculate K/D Ratio
+        float deaths = (float)other->client->resp.deaths;
+        float ratio_kd;
+
+        if (deaths <= 0)
+            ratio_kd = total_score; // Perfect game so far
+        else
+            ratio_kd = total_score / deaths;
+
+        // 3. Calculate FPM (Frags Per Minute)
+                // Subtract the gtime_t objects directly to get the duration
+        auto duration = level.time - other->client->resp.entertime;
+
+        // Divide the duration by 1_sec to convert it to a plain number (seconds)
+        float duration_seconds = (float)duration.milliseconds() / 1000.0f;
+
+        // Clamp to 60 seconds minimum to prevent massive math spikes when a player 
+        // joins and gets a kill in their first 5 seconds.
+        if (duration_seconds < 60.0f)
+            duration_seconds = 60.0f;
+
+        float duration_minutes = duration_seconds / 60.0f;
+        float ratio_fpm = total_score / duration_minutes;
+
+        // 4. Calculate Final Weighted Score
+        float heuristic = (ratio_fpm * FPM_WEIGHT) + (ratio_kd * KD_WEIGHT);
+
+        if (heuristic > best_heuristic)
+        {
+            best_heuristic = heuristic;
+            best = other;
+        }
+    }
+
+    // 5. Update Target
+    if (best && best != ent->client->chase_target)
+    {
+        ent->client->chase_target = best;
+        ent->client->update_chase = true;
+    }
+
+    // 6. Fallback: If 'best' is null (everyone is dead/frozen), pick anyone valid
+    if (!best)
+    {
+        for (uint32_t i = 1; i <= game.maxclients; i++)
+        {
+            edict_t* other = &g_edicts[i];
+            if (!other->inuse || other->client->resp.spectator) continue;
+
+            // Just find someone alive/unfrozen
+            if (other->health > 0 && !other->client->frozen)
+            {
+                if (other != ent->client->chase_target)
+                {
+                    ent->client->chase_target = other;
+                    ent->client->update_chase = true;
+                }
+                return;
+            }
+        }
+    }
 }
 
 void GetChaseTarget(edict_t* ent)

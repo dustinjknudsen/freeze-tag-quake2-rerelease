@@ -2799,6 +2799,7 @@ struct client_respawn_t
 	bool	old_hook;
 	int	help;
 	int	thawed;
+	int deaths;
 	/* freeze */
 };
 
@@ -3030,6 +3031,12 @@ struct gclient_t
 	int	hook_rescue_state;
 	gtime_t hook_rescue_time;
 	bool thirdperson;
+	gtime_t		team_switch_time;	// earliest time player can switch teams again
+	gtime_t spawn_protection_time;
+	bool		bot_rescue_urgent; //discontinued
+	gtime_t		last_alive_warn_time;
+	gtime_t		hook_taxi_time;		// active hook taxi timer
+	bool		auto_chase;
 	/* freeze */
 };
 

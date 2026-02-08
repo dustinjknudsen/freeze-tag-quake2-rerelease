@@ -20,7 +20,7 @@ void SelectNextItem(edict_t *ent, item_flags_t itflags, bool menu = true)
 		PMenu_Next(ent);
 		return;
 	}
-	else if (menu && cl->chase_target)
+	else if (menu && cl->chase_target && !cl->thirdperson)
 	{
 		ChaseNext(ent);
 		return;
@@ -68,7 +68,7 @@ void SelectPrevItem(edict_t *ent, item_flags_t itflags)
 		PMenu_Prev(ent);
 		return;
 	}
-	else if (cl->chase_target)
+	else if (cl->chase_target && !cl->thirdperson)
 	{
 		ChasePrev(ent);
 		return;
@@ -562,6 +562,9 @@ void Cmd_ThirdPerson_f(edict_t* ent)
 		ent->client->chase_target = nullptr;
 		ent->client->ps.pmove.pm_flags &= ~(PMF_NO_POSITIONAL_PREDICTION | PMF_NO_ANGULAR_PREDICTION);
 		ent->client->ps.viewoffset = {};
+		ent->client->ps.stats[STAT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FT_VIEWED] = 0;
 	}
 }
 
@@ -786,18 +789,14 @@ void Cmd_Drop_f(edict_t *ent)
 Cmd_Inven_f
 =================
 */
-void Cmd_Inven_f(edict_t *ent)
+void Cmd_Inven_f(edict_t* ent)
 {
 	int		   i;
-	gclient_t *cl;
-
+	gclient_t* cl;
 	cl = ent->client;
-
 	cl->showscores = false;
 	cl->showhelp = false;
-
 	globals.server_flags &= ~SERVER_FLAG_SLOW_TIME;
-
 	// ZOID
 	if (ent->client->menu)
 	{
@@ -806,23 +805,19 @@ void Cmd_Inven_f(edict_t *ent)
 		return;
 	}
 	// ZOID
-
 	if (cl->showinventory)
 	{
 		cl->showinventory = false;
 		return;
 	}
-
 	// ZOID
-	if (G_TeamplayEnabled() && cl->resp.ctf_team == CTF_NOTEAM)
+	if (G_TeamplayEnabled())
 	{
 		CTFOpenJoinMenu(ent);
 		return;
 	}
 	// ZOID
-
 	cl->showinventory = true;
-
 	gi.WriteByte(svc_inventory);
 	for (i = 0; i < IT_TOTAL; i++)
 		gi.WriteShort(cl->pers.inventory[i]);
@@ -871,6 +866,75 @@ void Cmd_InvUse_f(edict_t *ent)
 	it->use(ent, it);
 
 	ValidateSelectedItem(ent);
+}
+
+void Cmd_Rescue_f(edict_t* ent)
+{
+	if (!ent->client || !ent->client->frozen)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "You must be frozen to request rescue.\n");
+		return;
+	}
+
+	int assigned = 0;
+	int busy = 0;
+	int dead = 0;
+	int frozen = 0;
+
+	for (uint32_t i = 1; i <= game.maxclients; i++)
+	{
+		edict_t* bot = &g_edicts[i];
+		if (!bot->inuse)
+			continue;
+		if (!(bot->svflags & SVF_BOT))
+			continue;
+		if (bot->client->resp.ctf_team != ent->client->resp.ctf_team)
+			continue;
+		if (bot->client->frozen)
+		{
+			frozen++;
+			continue;
+		}
+		if (bot->health <= 0)
+		{
+			dead++;
+			continue;
+		}
+
+		// Clear old helper relationship
+		if (bot->client->bot_helper && bot->client->bot_helper != ent)
+			bot->client->bot_helper->client->bot_helper = nullptr;
+
+		bot->client->bot_helper = ent;
+		assigned++;
+	}
+
+	// Point frozen player's helper at nearest bot
+	edict_t* nearest = nullptr;
+	float best_dist = 999999;
+	for (uint32_t i = 1; i <= game.maxclients; i++)
+	{
+		edict_t* bot = &g_edicts[i];
+		if (!bot->inuse)
+			continue;
+		if (bot->client->bot_helper != ent)
+			continue;
+		float dist = (bot->s.origin - ent->s.origin).length();
+		if (dist < best_dist)
+		{
+			best_dist = dist;
+			nearest = bot;
+		}
+	}
+
+	if (nearest)
+		ent->client->bot_helper = nearest;
+
+	if (assigned == 0)
+		gi.LocClient_Print(ent, PRINT_HIGH, "No available bots. ({} frozen, {} dead)\n", frozen, dead);
+	else
+		gi.LocClient_Print(ent, PRINT_HIGH, "{} bot(s) coming! Nearest: {} ({} units)\n",
+			assigned, nearest->client->pers.netname, (int)best_dist);
 }
 
 /*
@@ -1547,7 +1611,7 @@ void Cmd_Switchteam_f(edict_t* ent)
 		return;
 
 	/* freeze */
-	if (ent->client->frozen && humanPlaying(ent)) {
+	if (ent->client->frozen) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_cant_change_teams");
 		return;
 	}
@@ -1615,13 +1679,13 @@ void Cmd_Switchteam_f(edict_t* ent)
 			}
 
 			ent->health = 0;
-			player_die(ent, ent, ent, 100000, vec3_origin, { MOD_SUICIDE, true });
+			player_die(ent, ent, ent, 100000, vec3_origin, { MOD_SUICIDE, false });
 
 			// don't even bother waiting for death frames
 			ent->deadflag = true;
 			respawn(ent);
 
-			ent->client->resp.score = 0;
+			//ent->client->resp.score = 0;
 
 			gi.LocBroadcast_Print(PRINT_HIGH, "$g_changed_team",
 				ent->client->pers.netname, CTFTeamName(best_team));
@@ -1740,6 +1804,8 @@ void ClientCommand(edict_t *ent)
 		Cmd_Notarget_f( ent );
 	else if ( Q_strcasecmp( cmd, "novisible" ) == 0 )
 		Cmd_Novisible_f( ent );
+	else if (Q_strcasecmp(cmd, "autochase") == 0)
+		Cmd_AutoChase_f(ent);
 	else if ( Q_strcasecmp( cmd, "alertall" ) == 0 )
 		Cmd_AlertAll_f( ent );
 	else if ( Q_strcasecmp( cmd, "noclip" ) == 0 )
@@ -1813,6 +1879,8 @@ void ClientCommand(edict_t *ent)
 	else if (Q_strcasecmp(cmd, "switchteam") == 0)
 		Cmd_Switchteam_f(ent);
 	/* freeze */
+	else if (Q_strcasecmp(cmd, "rescue") == 0)
+		Cmd_Rescue_f(ent);
 	else if (Q_strcasecmp(cmd, "hook") == 0)
 		cmdHook(ent);
 	else if (Q_strcasecmp(cmd, "thirdperson") == 0)

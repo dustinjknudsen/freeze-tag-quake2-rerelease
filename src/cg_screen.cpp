@@ -799,6 +799,9 @@ static void CG_DrawFreezeScoreboard(const char** s, int x, int y, int scale)
     if (!token[0]) return;
     total_players = atoi(token);
 
+    token = COM_Parse(s);
+    int winning_team = atoi(token);
+
     int current_y = y;
     int current_team = -1;
 
@@ -813,7 +816,7 @@ static void CG_DrawFreezeScoreboard(const char** s, int x, int y, int scale)
         token = COM_Parse(s); is_frozen = atoi(token);
         token = COM_Parse(s); team_idx = atoi(token); // 1=Red, 2=Blue, 3=Green, 4=Yellow, 0=Spec
 
-        // -- DRAW TEAM HEADER (If team changed) --
+        // DRAW TEAM HEADER (If team changed)
         if (team_idx != current_team)
         {
             current_team = team_idx;
@@ -825,30 +828,41 @@ static void CG_DrawFreezeScoreboard(const char** s, int x, int y, int scale)
             else if (team_idx == 3) { header_col = &color_grn_header; team_name = "GREEN TEAM"; }
             else if (team_idx == 4) { header_col = &color_yel_header; team_name = "YELLOW TEAM"; }
 
-            current_y += 4 * scale; // Spacing
+            // Flashing Logic 
+            if (winning_team > 0 && team_idx == winning_team)
+            {
+                // Flash white every 250ms
+                if ((cgi.CL_ClientTime() % 500) < 250)
+                {
+                    static rgba_t color_flash = { 255, 255, 255, 200 };
+                    header_col = &color_flash;
+                }
+            }
+            // ---------------------------
 
+            current_y += 4 * scale;
             // Draw Header Bar
             cgi.SCR_DrawColorPic(x, current_y, table_width, header_height, "_white", *header_col);
 
             // Draw Header Text
-            cgi.SCR_DrawFontString(team_name, x + (4 * scale), current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT);
+            cgi.SCR_DrawFontString(team_name, x + (4 * scale), current_y, scale, rgba_white, true, text_align_t::LEFT);
 
             // Draw Column Headers
             int h_x = x + col_width_name;
-            cgi.SCR_DrawFontString("SCR", h_x, current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
-            cgi.SCR_DrawFontString("FRG", h_x, current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
-            cgi.SCR_DrawFontString("THW", h_x, current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
-            cgi.SCR_DrawFontString("PNG", h_x, current_y + (1 * scale), scale, rgba_white, true, text_align_t::LEFT);
+            cgi.SCR_DrawFontString("SCR", h_x, current_y, scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
+            cgi.SCR_DrawFontString("FRG", h_x, current_y, scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
+            cgi.SCR_DrawFontString("THW", h_x, current_y, scale, rgba_white, true, text_align_t::LEFT); h_x += col_width_stat;
+            cgi.SCR_DrawFontString("PNG", h_x, current_y, scale, rgba_white, true, text_align_t::LEFT);
 
             current_y += header_height;
         }
 
-        // -- DRAW PLAYER ROW --
+        // DRAW PLAYER ROW
 
         // Background Row
         cgi.SCR_DrawColorPic(x, current_y, table_width, row_height, "_white", color_row_bg);
 
-        // Name (Looked up locally!)
+        // Name (looked up locally!)
         const char* name = cgi.CL_GetClientName(client_idx);
 
         // Truncate long names
@@ -864,18 +878,25 @@ static void CG_DrawFreezeScoreboard(const char** s, int x, int y, int scale)
             name = truncated_name;
         }
 
-        // Color logic: Frozen = Blue, Alive = White
+        // Color logic: frozen = blue, alive = white
         rgba_t name_color = is_frozen ? rgba_t{ 100, 100, 255, 255 } : rgba_white;
 
         // Draw Name
-        cgi.SCR_DrawFontString(name, x + (4 * scale), current_y + (-0.5 * scale), scale, name_color, true, text_align_t::LEFT);
+        cgi.SCR_DrawFontString(name, x + (4 * scale), current_y + (-1 * scale), scale, name_color, true, text_align_t::LEFT);
 
-        // Draw Stats
+        // Draw Stats (skip score/frags/thaws for spectators)
         int s_x = x + col_width_name;
-        cgi.SCR_DrawFontString(G_Fmt("{}", score).data(), s_x, current_y, scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
-        cgi.SCR_DrawFontString(G_Fmt("{}", frags).data(), s_x, current_y, scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
-        cgi.SCR_DrawFontString(G_Fmt("{}", thaws).data(), s_x, current_y, scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
-        cgi.SCR_DrawFontString(G_Fmt("{}", ping).data(), s_x, current_y, scale, rgba_white, true, text_align_t::LEFT);
+        if (team_idx != 0)
+        {
+            cgi.SCR_DrawFontString(G_Fmt("{}", score).data(), s_x, current_y + (-1 * scale), scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
+            cgi.SCR_DrawFontString(G_Fmt("{}", frags).data(), s_x, current_y + (-1 * scale), scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
+            cgi.SCR_DrawFontString(G_Fmt("{}", thaws).data(), s_x, current_y + (-1 * scale), scale, rgba_white, true, text_align_t::LEFT); s_x += col_width_stat;
+        }
+        else
+        {
+            s_x += col_width_stat * 3;  // Skip the stat columns
+        }
+        cgi.SCR_DrawFontString(G_Fmt("{}", ping).data(), s_x, current_y + (-1 * scale), scale, rgba_white, true, text_align_t::LEFT);
 
         current_y += row_height + (1 * scale); // 1 pixel gap
     }
@@ -927,6 +948,11 @@ static void CG_ExecuteLayoutString (const char *s, vrect_t hud_vrect, vrect_t hu
                 // Still need to parse through the data even if skipping
                 token = COM_Parse(&s);
                 int total = atoi(token);
+
+                // --- NEW: Consume Winning Team Token ---
+                COM_Parse(&s);
+                // ---------------------------------------
+
                 for (int i = 0; i < total; i++)
                 {
                     for (int j = 0; j < 7; j++) // 7 values per player

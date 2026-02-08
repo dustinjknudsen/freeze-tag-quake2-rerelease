@@ -574,6 +574,8 @@ DIE(player_die) (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 			self->client->respawn_time = ( level.time + gtime_t::from_sec( g_dm_force_respawn_time->value ) );
 		}
 
+		self->client->resp.deaths++;
+
 		LookAtKiller(self, inflictor, attacker);
 		self->client->ps.pmove.pm_type = PM_DEAD;
 		ClientObituary(self, inflictor, attacker, mod);
@@ -662,12 +664,47 @@ DIE(player_die) (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 	// ROGUE
 	//==============
 
-	/* freeze */
-	if (freezeCheck(self, mod)) {
-		freezeAnim(self);
-		return;
+		/* freeze */
+		if (freezeCheck(self, mod)) {
+			freezeAnim(self);
+			return;
+		}
+
+	// Player died from environmental/non-freezable cause
+	// Check if this was the last alive player on the team
+	if (deathmatch->integer && G_TeamplayEnabled())
+	{
+		int team = get_team_int(self->client->resp.ctf_team);
+		bool last_alive = true;
+
+		for (uint32_t i = 0; i < game.maxclients; i++)
+		{
+			edict_t* other = g_edicts + 1 + i;
+			if (!other->inuse)
+				continue;
+			if (other == self)
+				continue;
+			if (other->client->resp.spectator)
+				continue;
+			if (other->client->resp.ctf_team != self->client->resp.ctf_team)
+				continue;
+			if (other->health > 0 && !other->client->frozen)
+			{
+				last_alive = false;
+				break;
+			}
+		}
+
+		if (last_alive && (freeze[team].frozen > 0 || freeze[team].alive > 0))
+		{
+			// Force-freeze so the normal team-loss logic triggers
+			freezeAnim(self);
+			self->client->frozen_time = level.time + 1_sec;
+			return;
+		}
 	}
 	/* freeze */
+
 	if (self->health < -40)
 	{
 		/* freeze */
@@ -687,17 +724,15 @@ DIE(player_die) (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 			// pmm
 			// gib
 			gi.sound(self, CHAN_BODY, gi.soundindex("misc/udeath.wav"), 1, ATTN_NORM, 0);
-
 			// more meaty gibs for your dollar!
 			if (deathmatch->integer && (self->health < -80))
 				ThrowGibs(self, damage, { { 4, "models/objects/gibs/sm_meat/tris.md2" } });
-			
+
 			ThrowGibs(self, damage, { { 4, "models/objects/gibs/sm_meat/tris.md2" } });
 			// PMM
 		}
 		self->flags &= ~FL_NOGIB;
 		// pmm
-
 		ThrowClientHead(self, damage);
 		// ZOID
 		self->client->anim_priority = ANIM_DEATH;
@@ -734,7 +769,7 @@ DIE(player_die) (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 					break;
 				}
 			}
-			static constexpr const char *death_sounds[] = {
+			static constexpr const char* death_sounds[] = {
 				"*death1.wav",
 				"*death2.wav",
 				"*death3.wav",
@@ -2178,9 +2213,14 @@ void PutClientInServer(edict_t *ent)
 
 	// clear everything but the persistant data
 	saved = client->pers;
+	gtime_t saved_team_switch_time = client->team_switch_time;
 	memset(client, 0, sizeof(*client));
 	client->pers = saved;
 	client->resp = resp;
+	client->team_switch_time = saved_team_switch_time;
+	// Prevent stale timer from previous map
+	if (client->team_switch_time > level.time + 60_sec)
+		client->team_switch_time = 0_ms;
 
 	// on a new, fresh spawn (always in DM, clear inventory
 	// or new spawns in SP/coop)
@@ -2331,6 +2371,7 @@ void PutClientInServer(edict_t *ent)
 		ent->client->landmark_free_fall = true;
 	}
 
+	ent->client->spawn_protection_time = level.time + 1_sec;
 	gi.linkentity(ent);
 
 	if (!KillBox(ent, true, MOD_TELEFRAG_SPAWN))
@@ -3220,6 +3261,9 @@ void ClientThink(edict_t* ent, usercmd_t* ucmd)
 	edict_t* other;
 	uint32_t	i;
 	pmove_t		pm;
+
+	if (!ent || !ent->inuse || !ent->client)
+		return;
 
 	level.current_entity = ent;
 	client = ent->client;

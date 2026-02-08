@@ -88,6 +88,7 @@ void playerWeapon(edict_t* ent); // Gives player their starting weapons
 void freezeAnim(edict_t* ent);   // Sets player animation upon freezing
 void cmdMoan(edict_t* ent);      // Triggers the "Help me!" sound/message for frozen players
 void playerShell(edict_t* ent, ctfteam_t team); // Applies the team-colored ice shell effect
+bool powerupBlinkVisible();
 void freezeEffects(edict_t* ent); // Updates effects like thaw pulse or solid shell
 void FreezeScoreboardMessage(edict_t* ent, edict_t* killer);
 void CreateThirdPersonGhost(edict_t* ent);
@@ -107,6 +108,17 @@ void gibThink(edict_t* ent); // Frees the memory for a gib entity
 
 void freezeBotHelper(); // Function related to bot logic/management
 void freezeBotHook();
+
+// Bot team management
+extern ctfteam_t bot_pending_team;
+extern int bot_pending_count;
+void Cmd_BotAddTeam_f();
+void Cmd_BotKickTeam_f();
+void Cmd_BotKickAll_f();
+void Cmd_Rescue_f(edict_t* ent);
+void freezeBotDrown();
+void freezeBotHookTaxi();
+
 //void freezeBotItemHook();
 // 
 //================================================================================================
@@ -122,3 +134,6 @@ void firehook(edict_t* ent); // Spawns and initializes the hook entity
 void CreateFrozenBodyGhost(edict_t* ent); // Spawns the spectator/chase target
 void UpdateFrozenBodyGhost(edict_t* ent); // Updates ghost position/state
 void RemoveFrozenBodyGhost(edict_t* ent); // Cleans up the ghost entity on thaw/death
+
+void Cmd_AutoChase_f(edict_t* ent);
+void UpdateAutoChase(edict_t* ent);

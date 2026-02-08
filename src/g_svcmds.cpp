@@ -2,7 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
-
+#include "g_freeze.h"
 void Svcmd_Test_f()
 {
 	gi.LocClient_Print(nullptr, PRINT_HIGH, "Svcmd_Test_f()\n");
@@ -282,8 +282,7 @@ of the parameters
 */
 void ServerCommand()
 {
-	const char *cmd;
-
+	const char* cmd;
 	cmd = gi.argv(1);
 	if (Q_strcasecmp(cmd, "test") == 0)
 		Svcmd_Test_f();
@@ -297,6 +296,10 @@ void ServerCommand()
 		SVCmd_WriteIP_f();
 	else if (Q_strcasecmp(cmd, "nextmap") == 0)
 		SVCmd_NextMap_f();
+	else if (Q_strcasecmp(cmd, "bot_add") == 0)
+		Cmd_BotAddTeam_f();
+	else if (Q_strcasecmp(cmd, "bot_kick") == 0)
+		Cmd_BotKickTeam_f();
 	else
 		gi.LocClient_Print(nullptr, PRINT_HIGH, "Unknown server command \"{}\"\n", cmd);
 }
