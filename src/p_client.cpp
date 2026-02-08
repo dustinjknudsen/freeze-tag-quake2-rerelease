@@ -3037,7 +3037,7 @@ Will not be called between levels.
 */
 void ClientDisconnect(edict_t *ent)
 {
-	if (!ent->client)
+	if (!ent || !ent->inuse || !ent->client)
 		return;
 
 	// ZOID

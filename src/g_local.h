@@ -3037,6 +3037,7 @@ struct gclient_t
 	gtime_t		last_alive_warn_time;
 	gtime_t		hook_taxi_time;		// active hook taxi timer
 	bool		auto_chase;
+	bool motd_shown;
 	/* freeze */
 };
 

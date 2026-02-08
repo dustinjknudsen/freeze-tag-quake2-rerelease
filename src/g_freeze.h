@@ -79,6 +79,9 @@ bool endCheck();      // Checks for win conditions and triggers intermission
 void freezeSpawn();   // Handles player spawning/respawning
 void cvarFreeze();    // Initializes or refreshes CVars
 bool humanPlaying(edict_t* ent); // Checks if the entity is a human player (not a bot/spectator)
+void LoadMOTD();
+void OpenMOTD(edict_t* ent);
+extern int motd_line_count;
 
 //================================================================================================
 // SECTION 6: PLAYER ACTIONS, ANIMATIONS, AND VISUALS

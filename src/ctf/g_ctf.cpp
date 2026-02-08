@@ -2877,6 +2877,7 @@ void CTFChaseCam(edict_t* ent, pmenuhnd_t* p)
 
 	PMenu_Close(ent);
 
+	ent->client->auto_chase = false;
 	// If already chasing, stop chasing (return to free spectator)
 	if (ent->client->chase_target)
 	{
@@ -3055,7 +3056,7 @@ void CTFUpdateJoinMenu(edict_t* ent)
 		}
 		else
 		{
-			Q_strlcpy(entries[jmenu_green].text, "Join Green (Locked: Need 5 R/B)", sizeof(entries[jmenu_green].text));
+			Q_strlcpy(entries[jmenu_green].text, "Join Green (Locked)", sizeof(entries[jmenu_green].text));
 			entries[jmenu_green].SelectFunc = nullptr;
 		}
 
@@ -3071,7 +3072,7 @@ void CTFUpdateJoinMenu(edict_t* ent)
 		}
 		else
 		{
-			Q_strlcpy(entries[jmenu_yellow].text, "Join Yellow (Locked: Need 5 G)", sizeof(entries[jmenu_yellow].text));
+			Q_strlcpy(entries[jmenu_yellow].text, "Join Yellow (Locked)", sizeof(entries[jmenu_yellow].text));
 			entries[jmenu_yellow].SelectFunc = nullptr;
 		}
 	}
@@ -3246,14 +3247,12 @@ void CTFOpenJoinMenu(edict_t* ent)
 	PMenu_Open(ent, joinmenu, team, sizeof(joinmenu) / sizeof(pmenu_t), nullptr, CTFUpdateJoinMenu);
 }
 
-bool CTFStartClient(edict_t *ent)
+bool CTFStartClient(edict_t* ent)
 {
 	if (!G_TeamplayEnabled())
 		return false;
-
 	if (ent->client->resp.ctf_team != CTF_NOTEAM)
 		return false;
-
 	if ((!(ent->svflags & SVF_BOT) && !g_teamplay_force_join->integer) || ctfgame.match >= MATCH_SETUP)
 	{
 		// start as 'observer'
@@ -3266,7 +3265,16 @@ bool CTFStartClient(edict_t *ent)
 		ent->client->ps.gunskin = 0;
 		gi.linkentity(ent);
 
-		CTFOpenJoinMenu(ent);
+		// Show MOTD on first connect, then join menu
+		if (!ent->client->motd_shown && motd_line_count > 0)
+		{
+			ent->client->motd_shown = true;
+			OpenMOTD(ent);
+		}
+		else
+		{
+			CTFOpenJoinMenu(ent);
+		}
 		return true;
 	}
 	return false;

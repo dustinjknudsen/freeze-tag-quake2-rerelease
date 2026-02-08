@@ -1,6 +1,7 @@
 #include "m_player.h"
 #include "g_freeze.h"
 
+#define MAX_MOTD_LINES 20
 #define	DotProduct(a, b)	a.dot(b)
 #define	VectorSubtract(a, b, c)	c = a - b
 #define	VectorAdd(a, b, c)	c = a + b
@@ -11,6 +12,104 @@
 #define	VectorScale(a, b, c)	c = a * b
 #define	VectorLength(a)	a.length()
 #define	VectorMA(veca, scale, vecb, vecc)	vecc = veca + (vecb * scale)
+
+static char motd_lines[MAX_MOTD_LINES][64];
+int motd_line_count = 0;
+
+void LoadMOTD()
+{
+	motd_line_count = 0;
+
+	// Try opening from the mod folder (relative to working directory)
+	FILE* f = fopen("freezetag/freeze.ini", "r");
+	if (!f)
+	{
+		gi.Com_PrintFmt("Freeze Tag: freeze.ini not found\n");
+		return;
+	}
+
+	char line[256];
+	bool in_motd = false;
+
+	while (fgets(line, sizeof(line), f))
+	{
+		// Strip newline/carriage return
+		int len = (int)strlen(line);
+		while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+			line[--len] = '\0';
+
+		// Skip comments
+		if (line[0] == '/' && line[1] == '/')
+			continue;
+
+		// Section headers
+		if (line[0] == '[')
+		{
+			in_motd = !strncmp(line, "[motd]", 6);
+			continue;
+		}
+
+		if (!in_motd)
+			continue;
+
+		// End marker
+		if (line[0] == '#' && line[1] == '#' && line[2] == '#')
+			break;
+
+		if (motd_line_count >= MAX_MOTD_LINES)
+			break;
+
+		Q_strlcpy(motd_lines[motd_line_count], line, sizeof(motd_lines[0]));
+		motd_line_count++;
+	}
+
+	fclose(f);
+	gi.Com_PrintFmt("Freeze Tag: Loaded {} MOTD lines\n", motd_line_count);
+}
+
+static pmenu_t motd_menu_data[MAX_MOTD_LINES + 2];
+
+static void MOTDDismiss(edict_t* ent, pmenuhnd_t* p)
+{
+	PMenu_Close(ent);
+	CTFOpenJoinMenu(ent);
+}
+
+void OpenMOTD(edict_t* ent)
+{
+	if (motd_line_count == 0)
+	{
+		CTFOpenJoinMenu(ent);
+		return;
+	}
+
+	memset(motd_menu_data, 0, sizeof(motd_menu_data));
+
+	int slot = 0;
+	for (int i = 0; i < motd_line_count && slot < MAX_MOTD_LINES; i++)
+	{
+		Q_strlcpy(motd_menu_data[slot].text, motd_lines[i], sizeof(motd_menu_data[slot].text));
+		motd_menu_data[slot].align = PMENU_ALIGN_CENTER;
+		motd_menu_data[slot].SelectFunc = nullptr;
+		slot++;
+	}
+
+	// Blank line
+	motd_menu_data[slot].text[0] = '\0';
+	motd_menu_data[slot].align = PMENU_ALIGN_CENTER;
+	motd_menu_data[slot].SelectFunc = nullptr;
+	slot++;
+
+	// Dismiss option
+	Q_strlcpy(motd_menu_data[slot].text, "Press ENTER to continue", sizeof(motd_menu_data[slot].text));
+	motd_menu_data[slot].align = PMENU_ALIGN_CENTER;
+	motd_menu_data[slot].SelectFunc = MOTDDismiss;
+
+	int total = slot + 1;
+	PMenu_Open(ent, motd_menu_data, total - 1, total, nullptr, nullptr);
+}
+
+
 float VectorNormalize2(const vec3_t& v, vec3_t& out) {
 	float length = v.length();
 
@@ -948,6 +1047,23 @@ void playerBotHelper(edict_t* ent) {
 	}
 }
 
+void CleanupOrphanedGhosts()
+{
+	for (int i = 0; i < globals.num_edicts; i++)
+	{
+		edict_t* e = &g_edicts[i];
+		if (!e->inuse)
+			continue;
+
+		// Check if this is a ghost entity whose owner is gone
+		if (e->owner && (!e->owner->inuse || !e->owner->client))
+		{
+			G_FreeEdict(e);
+			continue;
+		}
+	}
+}
+
 // Bot team management
 ctfteam_t bot_pending_team = CTF_NOTEAM;
 int bot_pending_count = 0;
@@ -1150,6 +1266,8 @@ void Cmd_BotKickTeam_f()
 			continue;
 		if (!(ent->svflags & SVF_BOT))
 			continue;
+		if (!ent->client->pers.connected)
+			continue;
 		if (!kick_all_teams && ent->client->resp.ctf_team != team)
 			continue;
 		if (!kick_all_on_team && kicked >= count)
@@ -1186,6 +1304,8 @@ void Cmd_BotKickTeam_f()
 		else
 			gi.LocClient_Print(nullptr, PRINT_HIGH, "Kicked {} bot(s) from {} team. Wait before adding new bots.\n", kicked, CTFTeamName(team));
 	}
+	// Clean up any orphaned ghost entities
+	CleanupOrphanedGhosts();
 }
 
 void freezeBotHookTaxi()
@@ -2380,14 +2500,15 @@ void freezeSpawn()
 
 void cvarFreeze()
 {
-	hook_max_len = gi.cvar("hook_max_len", "1000", CVAR_NOFLAGS);
-	hook_rpf = gi.cvar("hook_rpf", "19", CVAR_NOFLAGS);
-	hook_min_len = gi.cvar("hook_min_len", "40", CVAR_NOFLAGS);
-	hook_speed = gi.cvar("hook_speed", "973", CVAR_NOFLAGS);
-	frozen_time = gi.cvar("frozen_time", "180", CVAR_NOFLAGS);
-	start_weapon = gi.cvar("start_weapon", "0", CVAR_NOFLAGS);
-	start_armor = gi.cvar("start_armor", "0", CVAR_NOFLAGS);
-	grapple_wall = gi.cvar("grapple_wall", "1", CVAR_NOFLAGS);
+	hook_max_len = gi.cvar("hook_max_len", "1000", CVAR_NOSET);
+	hook_rpf = gi.cvar("hook_rpf", "19", CVAR_NOSET);
+	hook_min_len = gi.cvar("hook_min_len", "40", CVAR_NOSET);
+	hook_speed = gi.cvar("hook_speed", "970", CVAR_NOSET);
+	frozen_time = gi.cvar("frozen_time", "180", CVAR_NOSET);
+	start_weapon = gi.cvar("start_weapon", "0", CVAR_NOSET);
+	start_armor = gi.cvar("start_armor", "0", CVAR_NOSET);
+	grapple_wall = gi.cvar("grapple_wall", "1", CVAR_NOSET);
+	LoadMOTD();
 }
 
 bool humanPlaying(edict_t* ent) {
